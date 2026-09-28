@@ -31,13 +31,11 @@ public sealed class ImageAssociationExportService(
 
         var records = await dbContext.CaptureImages.AsNoTracking()
             .Where(image => image.CaptureSet!.CaptureSession!.EventId == eventId)
-            .OrderBy(image => image.CaptureSet!.CaptureSession!.StartedAtUtc)
-            .ThenBy(image => image.CaptureSet!.StartedAtUtc)
-            .ThenBy(image => image.SequenceNumber)
             .Select(image => new ExportRecord(
                 image.CaptureSet!.CaptureSession!.Event!.Name,
                 image.CaptureSet.CaptureSession.Id,
                 image.CaptureSet.CaptureSession.StartedAtUtc,
+                image.CaptureSet.StartedAtUtc,
                 image.CaptureSet.CaptureSession.Photographer!.DisplayName,
                 image.CaptureSet.CaptureSession.StationCode,
                 image.CaptureSet.Id,
@@ -59,6 +57,11 @@ public sealed class ImageAssociationExportService(
                 image.ImageAsset.ByteLength,
                 (int)image.ImageAsset.State))
             .ToListAsync(cancellationToken);
+        records = records
+            .OrderBy(record => record.SessionStartedAtUtc)
+            .ThenBy(record => record.CaptureSetStartedAtUtc)
+            .ThenBy(record => record.SequenceNumber)
+            .ToList();
 
         await using var writer = new StreamWriter(destination, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), 64 * 1024, leaveOpen: true);
         await writer.WriteLineAsync(string.Join(",", Headers.Select(Escape)));
@@ -111,6 +114,7 @@ public sealed class ImageAssociationExportService(
         string EventName,
         string SessionId,
         DateTimeOffset SessionStartedAtUtc,
+        DateTimeOffset CaptureSetStartedAtUtc,
         string PhotographerName,
         string StationCode,
         string CaptureSetId,

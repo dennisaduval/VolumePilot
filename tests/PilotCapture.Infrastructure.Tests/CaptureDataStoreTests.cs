@@ -49,7 +49,7 @@ public sealed class CaptureDataStoreTests
         Assert.True(second.Image.IsBanner);
         Assert.Equal(CaptureImageReviewState.Accepted, second.Image.ReviewState);
 
-        var auditEntries = await dbContext.AuditEntries.OrderBy(entry => entry.OccurredAtUtc).ToListAsync(cancellationToken);
+        var auditEntries = await dbContext.AuditEntries.ToListAsync(cancellationToken);
         Assert.Equal(2, auditEntries.Count);
         Assert.All(auditEntries, entry => Assert.Equal("image.ingested", entry.Action));
         Assert.Contains(auditEntries, entry => entry.EntityId == first.Image.Id);
