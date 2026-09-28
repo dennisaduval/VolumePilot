@@ -22,6 +22,23 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<string?> GetSmartShooterOutputPathAsync(CancellationToken cancellationToken = default) =>
+        (await dbContext.LocalInstallations.AsNoTracking().SingleAsync(cancellationToken)).SmartShooterOutputPath;
+
+    public async Task SetSmartShooterOutputPathAsync(string path, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Choose Smart Shooter's JPEG output folder.", nameof(path));
+        var fullPath = Path.GetFullPath(path);
+        if (!Directory.Exists(fullPath))
+            throw new DirectoryNotFoundException($"Smart Shooter output folder '{fullPath}' does not exist.");
+        if (fullPath.Length > 2000)
+            throw new ArgumentException("The output folder path is too long.", nameof(path));
+        var installation = await dbContext.LocalInstallations.SingleAsync(cancellationToken);
+        installation.SmartShooterOutputPath = fullPath;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<CaptureEventChoice>> GetEventsAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Events.AsNoTracking()
             .Where(captureEvent => !captureEvent.IsArchived)
@@ -74,7 +91,8 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             .Select(set => new CaptureSetResult(set.Id, set.Subject!.DisplayName,
                 set.Subject!.IdentityStatus == SubjectIdentityStatus.Unidentified,
                 set.Membership == null ? null : set.Membership!.GroupId,
-                set.MembershipId))
+                set.MembershipId,
+                set.StartedAtUtc))
             .FirstOrDefaultAsync(cancellationToken);
         return activeSession with { CurrentCaptureSet = currentSet };
     }
@@ -168,25 +186,18 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             throw new InvalidOperationException("The selected subject belongs to another event.");
 
         var subjectName = membership.Subject!.DisplayName;
-        var existingSet = await dbContext.CaptureSets.AsNoTracking()
-            .Where(item => item.CaptureSessionId == session.Id
-                && item.SubjectId == membership.SubjectId
-                && item.MembershipId == membership.Id)
-            .Select(item => new CaptureSetResult(item.Id, subjectName, false, membership.GroupId, membership.Id))
-            .FirstOrDefaultAsync(cancellationToken);
-        if (existingSet is not null)
-            return existingSet;
+        var startedAt = DateTimeOffset.UtcNow;
 
         var captureSet = new CaptureSet
         {
             CaptureSessionId = session.Id,
             SubjectId = membership.SubjectId,
             MembershipId = membership.Id,
-            StartedAtUtc = DateTimeOffset.UtcNow
+            StartedAtUtc = startedAt
         };
         dbContext.CaptureSets.Add(captureSet);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new CaptureSetResult(captureSet.Id, subjectName, false, membership.GroupId, membership.Id);
+        return new CaptureSetResult(captureSet.Id, subjectName, false, membership.GroupId, membership.Id, startedAt);
     }
 
     public async Task<CaptureSetResult> CreateUnidentifiedSubjectAsync(
@@ -243,7 +254,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         };
         dbContext.CaptureSets.Add(captureSet);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new CaptureSetResult(captureSet.Id, subject.DisplayName, true, group?.Id, membership?.Id);
+        return new CaptureSetResult(captureSet.Id, subject.DisplayName, true, group?.Id, membership?.Id, now);
     }
 
     public async Task EndSessionAsync(string sessionId, CancellationToken cancellationToken = default)

@@ -23,7 +23,9 @@ public sealed partial class App : Avalonia.Application
             Directory.CreateDirectory(appDataPath);
 
             var services = new ServiceCollection();
-            services.AddPilotCaptureInfrastructure(Path.Combine(appDataPath, "pilot-capture.db"));
+            services.AddPilotCaptureInfrastructure(
+                Path.Combine(appDataPath, "pilot-capture.db"),
+                Path.Combine(appDataPath, "media"));
             _serviceProvider = services.BuildServiceProvider();
             using (var scope = _serviceProvider.CreateScope())
             {
@@ -34,7 +36,8 @@ public sealed partial class App : Avalonia.Application
             _windowScope = _serviceProvider.CreateScope();
             desktop.MainWindow = new MainWindow(
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>());
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>());
             desktop.Exit += (_, _) =>
             {
                 _windowScope?.Dispose();

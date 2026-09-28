@@ -20,9 +20,10 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [ ] Verify the supplied sample roster imports with expected rows and memberships on Windows 11 Pro.
 - [x] Start a session with a photographer, workflow profile, and persistent station code.
 - [x] Select a rostered membership or create an unidentified subject; resume the active session and selected capture set after restart.
-- [ ] Connect a photographer/camera workflow and ingest JPEG files.
-- [ ] Store image files outside SQLite with generated asset-based paths and checksums.
-- [ ] Persist subject, membership, session, image, and audit associations in one recoverable workflow.
+- [x] Connect Smart Shooter 5's local JPEG output folder and ingest stable JPEG files into the selected capture set.
+- [x] Copy image files outside SQLite with generated asset-based paths and SHA-256 checksums while preserving source files.
+- [x] Persist the image asset and capture image association together in SQLite with source-path duplicate protection.
+- [ ] Add audit entries for image ingest.
 - [ ] Show immediate face crop and thumbnails for portrait workflows; omit face review for action workflows.
 - [ ] Implement Primary, Banner, Reject, and Next review actions.
 - [ ] Verify saved state after closing and reopening the application.
