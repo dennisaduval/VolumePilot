@@ -2,18 +2,24 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="using:PilotCapture.Desktop"
         x:Class="PilotCapture.Desktop.MainWindow"
-        Title="Pilot Capture"
+        Title="VolumePilot | Pilot Capture"
+        Background="{DynamicResource VpCloudBrush}"
+        FontFamily="Segoe UI"
         Width="1200" Height="760"
         MinWidth="960" MinHeight="640">
   <Grid RowDefinitions="Auto,*">
-    <Border Grid.Row="0" Padding="24,16" Background="#232323">
-      <StackPanel Orientation="Horizontal" Spacing="12">
-        <TextBlock Text="PILOT CAPTURE" FontSize="18" FontWeight="Bold" Foreground="White" />
-        <TextBlock Text="0.1 · First Flight" VerticalAlignment="Center" Foreground="#D0D0D0" />
+    <Border Grid.Row="0" Padding="24,14" Background="{DynamicResource VpNavyBrush}">
+      <StackPanel Orientation="Horizontal" Spacing="18" VerticalAlignment="Center">
+        <TextBlock Text="VolumePilot" FontSize="24" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
+        <Border Width="1" Height="34" Background="#64748B" />
+        <StackPanel Spacing="2" VerticalAlignment="Center">
+          <TextBlock Text="PILOT CAPTURE" FontSize="14" FontWeight="Bold" Foreground="White" />
+          <TextBlock Text="0.1 · FIRST FLIGHT" FontSize="12" Foreground="#D7E3F2" />
+        </StackPanel>
       </StackPanel>
     </Border>
 
-    <TabControl x:Name="MainTabs" Grid.Row="1" Margin="24">
+    <TabControl x:Name="MainTabs" Grid.Row="1" Margin="20">
       <TabItem Header="Roster">
       <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="14">
       <Grid Grid.Row="0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="10">
@@ -24,11 +30,11 @@
         <Button Grid.Column="1" x:Name="OpenRosterButton" Content="Choose roster CSV…" Padding="18,10" VerticalAlignment="Center" Click="OnOpenRosterClick" />
         <TextBox Grid.Row="1" x:Name="EventName" PlaceholderText="Event name (required)" />
         <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-          <Button x:Name="ImportRosterButton" Content="Import roster" Padding="18,8" IsEnabled="False" Click="OnImportRosterClick" />
+          <Button Classes="primary-action" x:Name="ImportRosterButton" Content="Import roster" Padding="18,8" IsEnabled="False" Click="OnImportRosterClick" />
         </StackPanel>
       </Grid>
 
-      <Border Grid.Row="1" Padding="16" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
+      <Border Grid.Row="1" Padding="16" CornerRadius="8" BorderBrush="#DCE3ED" Background="White" BorderThickness="1">
         <StackPanel Spacing="12">
           <TextBlock Text="Column mapping" FontSize="18" FontWeight="SemiBold" />
           <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="10">
@@ -112,7 +118,7 @@
                 <TextBlock Text="Photographer" />
                 <TextBox x:Name="PhotographerName" PlaceholderText="Photographer name" />
               </StackPanel>
-              <Button Grid.Row="0" Grid.Column="3" x:Name="StartSessionButton" Content="Start session" Padding="16,8" VerticalAlignment="Bottom" Click="OnStartSessionClick" />
+              <Button Grid.Row="0" Grid.Column="3" Classes="primary-action" x:Name="StartSessionButton" Content="Start session" Padding="16,8" VerticalAlignment="Bottom" Click="OnStartSessionClick" />
 
               <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
                 <TextBlock Text="Workflow" />
@@ -144,7 +150,7 @@
               <StackPanel Spacing="10">
                 <TextBlock Text="Rostered subject" FontSize="18" FontWeight="SemiBold" />
                 <ComboBox x:Name="CaptureSubjectCombo" />
-                <Button x:Name="SelectSubjectButton" Content="Select subject for capture" IsEnabled="False" Padding="14,8" HorizontalAlignment="Left" Click="OnSelectSubjectClick" />
+                <Button Classes="primary-action" x:Name="SelectSubjectButton" Content="Select subject for capture" IsEnabled="False" Padding="14,8" HorizontalAlignment="Left" Click="OnSelectSubjectClick" />
                 <TextBlock x:Name="SelectedCaptureSubject" Text="No subject selected." TextWrapping="Wrap" />
               </StackPanel>
             </Border>
@@ -152,7 +158,7 @@
               <StackPanel Spacing="10">
                 <TextBlock Text="Unidentified subject" FontSize="18" FontWeight="SemiBold" />
                 <TextBox x:Name="UnidentifiedSubjectName" PlaceholderText="Temporary label, such as Walk-in 1" />
-                <Button x:Name="CreateUnidentifiedButton" Content="Create and select" IsEnabled="False" Padding="14,8" HorizontalAlignment="Left" Click="OnCreateUnidentifiedClick" />
+                <Button Classes="primary-action" x:Name="CreateUnidentifiedButton" Content="Create and select" IsEnabled="False" Padding="14,8" HorizontalAlignment="Left" Click="OnCreateUnidentifiedClick" />
                 <TextBlock Text="This creates an explicitly unidentified subject; no roster or filename matching is used." TextWrapping="Wrap" Opacity="0.75" />
               </StackPanel>
             </Border>
@@ -182,7 +188,7 @@
             <Button x:Name="SetPrimaryButton" Content="Set Primary" Padding="14,8" IsEnabled="False" Click="OnSetPrimaryClick" />
             <Button x:Name="ToggleBannerButton" Content="Mark Banner" Padding="14,8" IsEnabled="False" Click="OnToggleBannerClick" />
             <Button x:Name="RejectImageButton" Content="Reject" Padding="14,8" IsEnabled="False" Click="OnRejectImageClick" />
-            <Button x:Name="NextSubjectButton" Content="Next subject" Padding="14,8" IsEnabled="False" Click="OnNextSubjectClick" />
+            <Button Classes="forward-action" x:Name="NextSubjectButton" Content="Next subject" Padding="14,8" IsEnabled="False" Click="OnNextSubjectClick" />
           </StackPanel>
 
           <Border Grid.Row="2" Grid.Column="1" Padding="10" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
