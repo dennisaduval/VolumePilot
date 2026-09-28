@@ -8,6 +8,9 @@ namespace PilotCapture.Desktop;
 
 public sealed partial class App : Avalonia.Application
 {
+    private ServiceProvider? _serviceProvider;
+    private IServiceScope? _windowScope;
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
@@ -21,14 +24,20 @@ public sealed partial class App : Avalonia.Application
 
             var services = new ServiceCollection();
             services.AddPilotCaptureInfrastructure(Path.Combine(appDataPath, "pilot-capture.db"));
-            using (var provider = services.BuildServiceProvider())
-            using (var scope = provider.CreateScope())
+            _serviceProvider = services.BuildServiceProvider();
+            using (var scope = _serviceProvider.CreateScope())
             {
                 scope.ServiceProvider.GetRequiredService<DatabaseInitializer>()
                     .InitializeAsync().GetAwaiter().GetResult();
             }
 
-            desktop.MainWindow = new MainWindow();
+            _windowScope = _serviceProvider.CreateScope();
+            desktop.MainWindow = new MainWindow(_windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>());
+            desktop.Exit += (_, _) =>
+            {
+                _windowScope?.Dispose();
+                _serviceProvider?.Dispose();
+            };
         }
 
         base.OnFrameworkInitializationCompleted();

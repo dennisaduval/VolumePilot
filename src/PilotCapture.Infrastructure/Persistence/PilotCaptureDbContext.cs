@@ -18,6 +18,7 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
     public DbSet<CaptureImage> CaptureImages => Set<CaptureImage>();
     public DbSet<ImageAsset> ImageAssets => Set<ImageAsset>();
     public DbSet<RosterImport> RosterImports => Set<RosterImport>();
+    public DbSet<RosterImportRow> RosterImportRows => Set<RosterImportRow>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -158,6 +159,18 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
             entity.Property(x => x.SourceFileName).HasMaxLength(255).IsRequired();
             entity.Property(x => x.SourceSha256).HasMaxLength(64).IsRequired();
             entity.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RosterImportRow>(entity =>
+        {
+            entity.ToTable("roster_import_rows");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(26);
+            entity.Property(x => x.SourceDataJson).IsRequired();
+            entity.HasIndex(x => new { x.RosterImportId, x.SourceRecordNumber }).IsUnique();
+            entity.HasIndex(x => x.MembershipId);
+            entity.HasOne(x => x.RosterImport).WithMany().HasForeignKey(x => x.RosterImportId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Membership).WithMany().HasForeignKey(x => x.MembershipId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AuditEntry>(entity =>

@@ -4,20 +4,84 @@
         Title="Pilot Capture"
         Width="1200" Height="760"
         MinWidth="960" MinHeight="640">
-  <Grid RowDefinitions="Auto,*" ColumnDefinitions="*">
+  <Grid RowDefinitions="Auto,*">
     <Border Grid.Row="0" Padding="24,16" Background="#232323">
       <StackPanel Orientation="Horizontal" Spacing="12">
         <TextBlock Text="PILOT CAPTURE" FontSize="18" FontWeight="Bold" Foreground="White" />
         <TextBlock Text="0.1 · First Flight" VerticalAlignment="Center" Foreground="#D0D0D0" />
       </StackPanel>
     </Border>
-    <Grid Grid.Row="1" RowDefinitions="*,Auto" Margin="28">
-      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" MaxWidth="620">
-        <TextBlock Text="Capture, even offline." FontSize="30" FontWeight="SemiBold" HorizontalAlignment="Center" />
-        <TextBlock Text="Local event setup, roster import, subject selection, and image review are coming together here. Your event records will be stored on this computer." TextWrapping="Wrap" TextAlignment="Center" FontSize="16" Opacity="0.78" />
-        <TextBlock Text="Initial desktop shell" HorizontalAlignment="Center" Margin="0,14,0,0" Opacity="0.55" />
+
+    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,Auto,*" Margin="24" RowSpacing="14">
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="10">
+        <StackPanel Spacing="5">
+          <TextBlock Text="Roster intake" FontSize="26" FontWeight="SemiBold" />
+          <TextBlock Text="Review the column mapping and possible name matches before saving the roster locally." TextWrapping="Wrap" Opacity="0.75" />
+        </StackPanel>
+        <Button Grid.Column="1" x:Name="OpenRosterButton" Content="Choose roster CSV…" Padding="18,10" VerticalAlignment="Center" Click="OnOpenRosterClick" />
+        <TextBox Grid.Row="1" x:Name="EventName" Watermark="Event name (required)" />
+        <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button x:Name="ImportRosterButton" Content="Import roster" Padding="18,8" IsEnabled="False" Click="OnImportRosterClick" />
+        </StackPanel>
+      </Grid>
+
+      <Border Grid.Row="1" Padding="16" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Column mapping" FontSize="18" FontWeight="SemiBold" />
+          <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="10">
+            <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
+              <TextBlock Text="First name" />
+              <ComboBox x:Name="FirstNameColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
+            </StackPanel>
+            <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+              <TextBlock Text="Last name" />
+              <ComboBox x:Name="LastNameColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
+            </StackPanel>
+            <StackPanel Grid.Row="0" Grid.Column="2" Spacing="4">
+              <TextBlock Text="Team / school" />
+              <ComboBox x:Name="TeamOrSchoolColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
+              <TextBlock Text="Sport / group" />
+              <ComboBox x:Name="SportOrGroupColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+              <TextBlock Text="Roster number" />
+              <ComboBox x:Name="RosterNumberColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Grid.Column="2" Spacing="4">
+              <TextBlock Text="Class / category (preserved)" />
+              <ComboBox x:Name="ClassOrCategoryColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <StackPanel Grid.Row="2" Spacing="4">
+        <TextBlock x:Name="RosterSummary" FontWeight="SemiBold" Text="Choose a CSV file to start a preview." />
+        <TextBlock x:Name="RosterWarnings" TextWrapping="Wrap" Foreground="#8A4B00" />
       </StackPanel>
-      <TextBlock Grid.Row="1" Text="Offline-first • Local SQLite storage" HorizontalAlignment="Center" Opacity="0.6" />
+
+      <Border Grid.Row="3" Padding="12" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1" MaxHeight="140">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Review possible same-name matches (unchecked by default)" FontWeight="SemiBold" />
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="MatchReviewPanel" Spacing="3" />
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Row="4" Padding="12" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+          <ItemsControl x:Name="RosterPreviewRows">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding}" FontFamily="monospace" Margin="2,4" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
     </Grid>
   </Grid>
 </Window>

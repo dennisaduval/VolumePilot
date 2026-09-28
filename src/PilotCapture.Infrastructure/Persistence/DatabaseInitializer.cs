@@ -27,34 +27,64 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
         await using var readVersion = connection.CreateCommand();
         readVersion.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations;";
         var currentVersion = Convert.ToInt32(await readVersion.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
-        if (currentVersion >= 1)
+        if (currentVersion >= 2)
         {
             await EnsureLocalInstallationAsync(cancellationToken);
             return;
         }
 
-        var migrationSql = await ReadInitialMigrationAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await using (var migrate = connection.CreateCommand())
+        if (currentVersion < 1)
         {
-            migrate.Transaction = transaction;
-            migrate.CommandText = migrationSql;
-            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            var migrationSql = await ReadMigrationAsync("0001_initial.sql", cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using (var migrate = connection.CreateCommand())
+            {
+                migrate.Transaction = transaction;
+                migrate.CommandText = migrationSql;
+                await migrate.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await MarkMigrationAsync(connection, transaction, 1, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            currentVersion = 1;
         }
 
-        await using (var mark = connection.CreateCommand())
+        if (currentVersion < 2)
         {
-            mark.Transaction = transaction;
-            mark.CommandText = "INSERT INTO schema_migrations(version, applied_at_utc) VALUES (1, $appliedAt);";
-            var parameter = mark.CreateParameter();
-            parameter.ParameterName = "$appliedAt";
-            parameter.Value = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-            mark.Parameters.Add(parameter);
-            await mark.ExecuteNonQueryAsync(cancellationToken);
+            var migrationSql = await ReadMigrationAsync("0002_roster_import_rows.sql", cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using (var migrate = connection.CreateCommand())
+            {
+                migrate.Transaction = transaction;
+                migrate.CommandText = migrationSql;
+                await migrate.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await MarkMigrationAsync(connection, transaction, 2, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
 
-        await transaction.CommitAsync(cancellationToken);
         await EnsureLocalInstallationAsync(cancellationToken);
+    }
+
+    private static async Task MarkMigrationAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        int version,
+        CancellationToken cancellationToken)
+    {
+        await using var mark = connection.CreateCommand();
+        mark.Transaction = transaction;
+        mark.CommandText = "INSERT INTO schema_migrations(version, applied_at_utc) VALUES ($version, $appliedAt);";
+        var versionParameter = mark.CreateParameter();
+        versionParameter.ParameterName = "$version";
+        versionParameter.Value = version;
+        mark.Parameters.Add(versionParameter);
+        var timeParameter = mark.CreateParameter();
+        timeParameter.ParameterName = "$appliedAt";
+        timeParameter.Value = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        mark.Parameters.Add(timeParameter);
+        await mark.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task EnsureLocalInstallationAsync(CancellationToken cancellationToken)
@@ -66,11 +96,11 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task<string> ReadInitialMigrationAsync(CancellationToken cancellationToken)
+    private static async Task<string> ReadMigrationAsync(string fileName, CancellationToken cancellationToken)
     {
         var assembly = typeof(DatabaseInitializer).Assembly;
         var resourceName = assembly.GetManifestResourceNames()
-            .Single(x => x.EndsWith("0001_initial.sql", StringComparison.Ordinal));
+            .Single(x => x.EndsWith(fileName, StringComparison.Ordinal));
         await using var stream = assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Embedded migration resource '{resourceName}' was not found.");
         using var reader = new StreamReader(stream);
