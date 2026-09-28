@@ -41,6 +41,7 @@ public sealed partial class App : Avalonia.Application
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageReviewService>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssociationExportService>(),
                 _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>());
             desktop.Exit += (_, _) =>
             {

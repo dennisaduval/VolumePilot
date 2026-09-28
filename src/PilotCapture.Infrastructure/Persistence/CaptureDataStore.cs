@@ -6,8 +6,13 @@ namespace PilotCapture.Infrastructure.Persistence;
 
 public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICaptureDataStore
 {
-    public async Task AddImageAsync(CaptureImage image, ImageAsset asset, CancellationToken cancellationToken)
+    public async Task AddImageAsync(
+        CaptureImage image,
+        ImageAsset asset,
+        AuditEntry auditEntry,
+        CancellationToken cancellationToken)
     {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         if (!image.IsPrimary && !await dbContext.CaptureImages.AnyAsync(
                 item => item.CaptureSetId == image.CaptureSetId && item.IsPrimary,
                 cancellationToken))
@@ -18,7 +23,9 @@ public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICapture
 
         dbContext.ImageAssets.Add(asset);
         dbContext.CaptureImages.Add(image);
+        dbContext.AuditEntries.Add(auditEntry);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task ApplyReviewActionAsync(

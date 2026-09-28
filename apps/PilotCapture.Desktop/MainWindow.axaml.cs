@@ -25,6 +25,7 @@ public sealed partial class MainWindow : Window
     private readonly IImageIngestService _imageIngestService;
     private readonly IImageReviewService _imageReviewService;
     private readonly IImageAssetStore _imageAssetStore;
+    private readonly IImageAssociationExportService _imageAssociationExportService;
     private readonly WindowsPortraitFaceDetector _faceDetector;
     private readonly SemaphoreSlim _captureOperationLock = new(1, 1);
     private IReadOnlyList<CaptureImageReviewRow> _captureImageRows = [];
@@ -44,6 +45,7 @@ public sealed partial class MainWindow : Window
         IImageIngestService imageIngestService,
         IImageReviewService imageReviewService,
         IImageAssetStore imageAssetStore,
+        IImageAssociationExportService imageAssociationExportService,
         WindowsPortraitFaceDetector faceDetector)
     {
         _rosterImportService = rosterImportService;
@@ -51,6 +53,7 @@ public sealed partial class MainWindow : Window
         _imageIngestService = imageIngestService;
         _imageReviewService = imageReviewService;
         _imageAssetStore = imageAssetStore;
+        _imageAssociationExportService = imageAssociationExportService;
         _faceDetector = faceDetector;
         AvaloniaXamlLoader.Load(this);
         EventName.TextChanged += (_, _) => UpdateImportAvailability();
@@ -305,6 +308,42 @@ public sealed partial class MainWindow : Window
     {
         if (!_isPopulatingCaptureChoices)
             await RefreshCaptureGroupsAsync();
+    }
+
+    private async void OnExportImageAssociationsClick(object? sender, RoutedEventArgs e)
+    {
+        var captureEvent = SelectedChoice<CaptureEventChoice>(CaptureEventCombo);
+        if (captureEvent is null)
+            return;
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export image-to-subject associations",
+            SuggestedFileName = $"{MakeSafeFileName(captureEvent.Name)}-image-associations.csv",
+            DefaultExtension = "csv",
+            ShowOverwritePrompt = true,
+            FileTypeChoices = [new FilePickerFileType("CSV files") { Patterns = ["*.csv"] }]
+        });
+        if (file is null)
+            return;
+
+        try
+        {
+            await using var output = await file.OpenWriteAsync();
+            var exportedCount = await _imageAssociationExportService.ExportEventAsync(captureEvent.Id, output);
+            ImageIngestStatus.Text = $"Exported {exportedCount} image association(s) to {file.Name}. Missing image files are marked in the CSV.";
+        }
+        catch (Exception exception)
+        {
+            ImageIngestStatus.Text = $"Image association export failed: {exception.Message}";
+        }
+    }
+
+    private static string MakeSafeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        var safe = new string(value.Select(character => invalid.Contains(character) ? '-' : character).ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(safe) ? "event" : safe;
     }
 
     private async void OnCaptureGroupChanged(object? sender, SelectionChangedEventArgs e)
@@ -830,6 +869,7 @@ public sealed partial class MainWindow : Window
         StartSessionButton.IsEnabled = !active
             && SelectedChoice<CaptureEventChoice>(CaptureEventCombo) is not null
             && !string.IsNullOrWhiteSpace(PhotographerName.Text);
+        ExportAssociationsButton.IsEnabled = SelectedChoice<CaptureEventChoice>(CaptureEventCombo) is not null;
         EndSessionButton.IsEnabled = active;
         CaptureEventCombo.IsEnabled = !active;
         PhotographerName.IsEnabled = !active;

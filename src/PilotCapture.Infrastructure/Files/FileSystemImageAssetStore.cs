@@ -80,6 +80,8 @@ public sealed class FileSystemImageAssetStore(string mediaRootPath) : IImageAsse
         return Task.FromResult(stream);
     }
 
+    public bool Exists(string relativePath) => File.Exists(ResolveManagedPath(relativePath));
+
     public Task DeleteAsync(string relativePath, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
