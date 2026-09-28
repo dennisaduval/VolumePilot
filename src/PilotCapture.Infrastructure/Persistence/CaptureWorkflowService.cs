@@ -42,7 +42,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
     public async Task<IReadOnlyList<CaptureEventChoice>> GetEventsAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Events.AsNoTracking()
             .Where(captureEvent => !captureEvent.IsArchived)
-            .OrderByDescending(captureEvent => captureEvent.CreatedAtUtc)
+            .OrderByDescending(captureEvent => captureEvent.Id)
             .Select(captureEvent => new CaptureEventChoice(captureEvent.Id, captureEvent.Name))
             .ToListAsync(cancellationToken);
 
@@ -72,7 +72,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         var installation = await dbContext.LocalInstallations.AsNoTracking().SingleAsync(cancellationToken);
         var activeSession = await dbContext.CaptureSessions.AsNoTracking()
             .Where(session => session.InstallationId == installation.InstallationId && session.EndedAtUtc == null)
-            .OrderByDescending(session => session.StartedAtUtc)
+            .OrderByDescending(session => session.Id)
             .Select(session => new ActiveCaptureSession(
                 session.Id,
                 session.EventId,
@@ -89,7 +89,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
 
         var currentSet = await dbContext.CaptureSets.AsNoTracking()
             .Where(set => set.CaptureSessionId == activeSession.Id && set.CompletedAtUtc == null)
-            .OrderByDescending(set => set.StartedAtUtc)
+            .OrderByDescending(set => set.Id)
             .Select(set => new CaptureSetResult(set.Id, set.Subject!.DisplayName,
                 set.Subject!.IdentityStatus == SubjectIdentityStatus.Unidentified,
                 set.Membership == null ? null : set.Membership!.GroupId,

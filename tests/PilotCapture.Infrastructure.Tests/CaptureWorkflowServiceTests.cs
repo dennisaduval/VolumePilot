@@ -58,6 +58,7 @@ public sealed class CaptureWorkflowServiceTests
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var workflow = new CaptureWorkflowService(dbContext);
+            Assert.Contains(await workflow.GetEventsAsync(cancellationToken), item => item.Id == captureEvent.Id);
             var session = await workflow.StartSessionAsync(
                 captureEvent.Id,
                 "Test Photographer",
