@@ -39,6 +39,17 @@ Pilot Capture is the desktop, local-first capture application in VolumePilot. It
 - Action-photo face cropping.
 - Camera image-size control/monitoring, advanced image processing, OpenCV/ONNX inference, and network station messaging.
 
+## Roster CSV mapping guidance
+
+The first supplied sample roster had `NUMBER`, `FIRSTNAME`, `LASTNAME`, `TEAM/SCHOOL`, `SPORT`, and `CLASS` columns. Header names produce editable mapping suggestions; they do not force a schema for every organization. For this shape, the initial suggestions are:
+
+- `FIRSTNAME` and `LASTNAME` for the displayed subject name.
+- `TEAM/SCHOOL` and `SPORT` together for the group path.
+- `NUMBER` as the membership roster number only. Jersey numbers are not unique subject identifiers.
+- `CLASS` retained as a source category. The sample uses it for both student class years and staff labels, so it must not be silently converted to one role or grade field.
+
+The sample has no stable person ID. Exact names that appear under more than one group are flagged as possible matches for operator review, never merged automatically. The import flow must retain the selected mapping and every original source cell so a mistaken suggestion can be corrected without rewriting imported source data.
+
 ## Domain model
 
 The initial model separates event/session context, people, their group memberships, capture organization, and image-file metadata:
