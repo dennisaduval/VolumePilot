@@ -27,6 +27,7 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [x] Add an audit entry in the same SQLite transaction as each image ingest.
 - [x] Show an immediate on-device face crop and thumbnails for portrait workflows; show the full image for action workflows and fall back to the full image if detection fails.
 - [x] Implement independent Primary and Banner roles, Reject, and Next subject actions with persistent local state.
+- [x] Guard Next against rapid repeat taps and verify roster-order advancement and active-subject recovery in automated tests.
 - [ ] Verify saved state after closing and reopening the application.
 - [x] Export event image-to-subject associations as CSV, including review roles and missing-file status.
 

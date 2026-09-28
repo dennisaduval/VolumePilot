@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _imageScanTimer;
     private bool _isScanningImageFolder;
     private bool _isMonitoringImageFolder;
+    private bool _isAdvancingSubject;
     private readonly HashSet<string> _observedSourceVersions = new(StringComparer.OrdinalIgnoreCase);
 
     public MainWindow(
@@ -681,10 +682,15 @@ public sealed partial class MainWindow : Window
 
     private async void OnNextSubjectClick(object? sender, RoutedEventArgs e)
     {
+        if (_isAdvancingSubject)
+            return;
+
         var activeSession = _activeCaptureSession;
         if (activeSession?.CurrentCaptureSet is null)
             return;
 
+        _isAdvancingSubject = true;
+        UpdateReviewControls();
         await _captureOperationLock.WaitAsync();
         try
         {
@@ -715,6 +721,8 @@ public sealed partial class MainWindow : Window
         finally
         {
             _captureOperationLock.Release();
+            _isAdvancingSubject = false;
+            UpdateReviewControls();
         }
     }
 
@@ -733,7 +741,8 @@ public sealed partial class MainWindow : Window
         SetPrimaryButton.IsEnabled = selected is not null;
         ToggleBannerButton.IsEnabled = selected is not null;
         RejectImageButton.IsEnabled = selected is not null;
-        NextSubjectButton.IsEnabled = _activeCaptureSession?.CurrentCaptureSet is not null;
+        NextSubjectButton.IsEnabled = !_isAdvancingSubject
+            && _activeCaptureSession?.CurrentCaptureSet is not null;
         ToggleBannerButton.Content = selected?.IsBanner == true ? "Remove Banner" : "Mark Banner";
     }
 
