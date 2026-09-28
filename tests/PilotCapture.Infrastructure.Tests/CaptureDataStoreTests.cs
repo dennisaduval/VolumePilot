@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PilotCapture.Application;
 using PilotCapture.Domain;
+using PilotCapture.Infrastructure.Files;
 using PilotCapture.Infrastructure.Persistence;
 using Xunit;
 
@@ -22,14 +23,15 @@ public sealed class CaptureDataStoreTests
         await new DatabaseInitializer(dbContext).InitializeAsync(cancellationToken);
 
         var captureSet = await CreateCaptureSetAsync(dbContext, cancellationToken);
+        var installationId = await dbContext.LocalInstallations.Select(item => item.InstallationId).SingleAsync(cancellationToken);
         var store = new CaptureDataStore(dbContext);
         var first = CreateImage(captureSet.Id, 0);
-        await store.AddImageAsync(first.Image, first.Asset, cancellationToken);
+        await store.AddImageAsync(first.Image, first.Asset, CreateAuditEntry(first.Image, installationId), cancellationToken);
         Assert.True(first.Image.IsPrimary);
         Assert.Equal(CaptureImageReviewState.Accepted, first.Image.ReviewState);
 
         var second = CreateImage(captureSet.Id, 1);
-        await store.AddImageAsync(second.Image, second.Asset, cancellationToken);
+        await store.AddImageAsync(second.Image, second.Asset, CreateAuditEntry(second.Image, installationId), cancellationToken);
         Assert.False(second.Image.IsPrimary);
         Assert.Equal(CaptureImageReviewState.Pending, second.Image.ReviewState);
 
@@ -46,6 +48,27 @@ public sealed class CaptureDataStoreTests
         Assert.True(second.Image.IsPrimary);
         Assert.True(second.Image.IsBanner);
         Assert.Equal(CaptureImageReviewState.Accepted, second.Image.ReviewState);
+
+        var auditEntries = await dbContext.AuditEntries.ToListAsync(cancellationToken);
+        Assert.Equal(2, auditEntries.Count);
+        Assert.All(auditEntries, entry => Assert.Equal("image.ingested", entry.Action));
+        Assert.Contains(auditEntries, entry => entry.EntityId == first.Image.Id);
+
+        var eventId = await dbContext.CaptureSets
+            .Where(item => item.Id == captureSet.Id)
+            .Select(item => item.CaptureSession!.EventId)
+            .SingleAsync(cancellationToken);
+        await using var export = new MemoryStream();
+        var exporter = new ImageAssociationExportService(
+            dbContext,
+            new FileSystemImageAssetStore(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+        var exportedRows = await exporter.ExportEventAsync(eventId, export, cancellationToken);
+        var csv = System.Text.Encoding.UTF8.GetString(export.ToArray());
+        Assert.Equal(2, exportedRows);
+        Assert.Contains("Test team", csv);
+        Assert.Contains("Alex Example", csv);
+        Assert.Contains("File Exists", csv);
+        Assert.Contains(",False", csv);
     }
 
     private static async Task<CaptureSet> CreateCaptureSetAsync(
@@ -129,5 +152,18 @@ public sealed class CaptureDataStoreTests
             CapturedAtUtc = now
         };
         return (image, asset);
+    }
+
+    private static AuditEntry CreateAuditEntry(CaptureImage image, string installationId)
+    {
+        return new AuditEntry
+        {
+            EntityType = "capture_image",
+            EntityId = image.Id,
+            Action = "image.ingested",
+            InstallationId = installationId,
+            StationCode = "s10",
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        };
     }
 }

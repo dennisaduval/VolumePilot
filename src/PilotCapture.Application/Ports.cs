@@ -4,7 +4,7 @@ namespace PilotCapture.Application;
 
 public interface ICaptureDataStore
 {
-    Task AddImageAsync(CaptureImage image, ImageAsset asset, CancellationToken cancellationToken);
+    Task AddImageAsync(CaptureImage image, ImageAsset asset, AuditEntry auditEntry, CancellationToken cancellationToken);
     Task ApplyReviewActionAsync(string captureImageId, CaptureImageReviewAction action, CancellationToken cancellationToken);
 }
 
@@ -40,7 +40,39 @@ public interface IImageAssetStore
         CancellationToken cancellationToken);
 
     Task<Stream> OpenReadAsync(string relativePath, CancellationToken cancellationToken);
+    bool Exists(string relativePath);
     Task DeleteAsync(string relativePath, CancellationToken cancellationToken);
+}
+
+public sealed record ImageAssociationExportRow(
+    string EventName,
+    string CaptureSessionId,
+    DateTimeOffset SessionStartedAtUtc,
+    string PhotographerName,
+    string StationCode,
+    string CaptureSetId,
+    string SubjectId,
+    string SubjectName,
+    string? GroupName,
+    string? MembershipId,
+    string? RosterNumber,
+    string? Role,
+    string CaptureImageId,
+    int SequenceNumber,
+    DateTimeOffset CapturedAtUtc,
+    string ReviewState,
+    bool IsPrimary,
+    bool IsBanner,
+    string OriginalFileName,
+    string RelativePath,
+    string Sha256,
+    long ByteLength,
+    string AssetState,
+    bool FileExists);
+
+public interface IImageAssociationExportService
+{
+    Task<int> ExportEventAsync(string eventId, Stream destination, CancellationToken cancellationToken = default);
 }
 
 public sealed record StoredImageAsset(

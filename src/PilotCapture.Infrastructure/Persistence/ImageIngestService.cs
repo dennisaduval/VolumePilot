@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using PilotCapture.Application;
 using PilotCapture.Domain;
 
@@ -83,10 +84,30 @@ public sealed class ImageIngestService(
             SequenceNumber = sequence,
             CapturedAtUtc = sourceLastWriteUtc
         };
+        var auditEntry = new AuditEntry
+        {
+            EntityType = "capture_image",
+            EntityId = image.Id,
+            Action = "image.ingested",
+            InstallationId = installation.InstallationId,
+            StationCode = session.StationCode,
+            CorrelationId = session.Id,
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                sessionId = session.Id,
+                captureSetId = captureSet.Id,
+                eventId = session.EventId,
+                originalFileName = asset.OriginalFileName,
+                assetId = asset.Id,
+                sha256 = asset.Sha256,
+                byteLength = asset.ByteLength
+            }),
+            OccurredAtUtc = DateTimeOffset.UtcNow
+        };
 
         try
         {
-            await captureDataStore.AddImageAsync(image, asset, cancellationToken);
+            await captureDataStore.AddImageAsync(image, asset, auditEntry, cancellationToken);
         }
         catch
         {
