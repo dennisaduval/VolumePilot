@@ -12,33 +12,34 @@ public sealed class CaptureDataStoreTests
     [Fact]
     public async Task First_image_becomes_primary_and_review_roles_remain_independent()
     {
+        var cancellationToken = TestContext.Current.CancellationToken;
         await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
+        await connection.OpenAsync(cancellationToken);
         var options = new DbContextOptionsBuilder<PilotCaptureDbContext>()
             .UseSqlite(connection)
             .Options;
         await using var dbContext = new PilotCaptureDbContext(options);
-        await new DatabaseInitializer(dbContext).InitializeAsync();
+        await new DatabaseInitializer(dbContext).InitializeAsync(cancellationToken);
 
-        var captureSet = await CreateCaptureSetAsync(dbContext);
+        var captureSet = await CreateCaptureSetAsync(dbContext, cancellationToken);
         var store = new CaptureDataStore(dbContext);
         var first = CreateImage(captureSet.Id, 0);
-        await store.AddImageAsync(first.Image, first.Asset, CancellationToken.None);
+        await store.AddImageAsync(first.Image, first.Asset, cancellationToken);
         Assert.True(first.Image.IsPrimary);
         Assert.Equal(CaptureImageReviewState.Accepted, first.Image.ReviewState);
 
         var second = CreateImage(captureSet.Id, 1);
-        await store.AddImageAsync(second.Image, second.Asset, CancellationToken.None);
+        await store.AddImageAsync(second.Image, second.Asset, cancellationToken);
         Assert.False(second.Image.IsPrimary);
         Assert.Equal(CaptureImageReviewState.Pending, second.Image.ReviewState);
 
-        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.ToggleBanner, CancellationToken.None);
-        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.ToggleBanner, CancellationToken.None);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.ToggleBanner, cancellationToken);
+        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.ToggleBanner, cancellationToken);
         Assert.True(first.Image.IsPrimary);
         Assert.True(first.Image.IsBanner);
         Assert.True(second.Image.IsBanner);
 
-        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, CancellationToken.None);
+        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, cancellationToken);
         Assert.Equal(CaptureImageReviewState.Rejected, first.Image.ReviewState);
         Assert.False(first.Image.IsPrimary);
         Assert.False(first.Image.IsBanner);
@@ -47,7 +48,9 @@ public sealed class CaptureDataStoreTests
         Assert.Equal(CaptureImageReviewState.Accepted, second.Image.ReviewState);
     }
 
-    private static async Task<CaptureSet> CreateCaptureSetAsync(PilotCaptureDbContext dbContext)
+    private static async Task<CaptureSet> CreateCaptureSetAsync(
+        PilotCaptureDbContext dbContext,
+        CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var captureEvent = new PilotCapture.Domain.Event { Name = "Review test", CreatedAtUtc = now };
@@ -79,9 +82,9 @@ public sealed class CaptureDataStoreTests
         dbContext.Memberships.Add(membership);
         dbContext.CaptureProfiles.Add(profile);
         dbContext.Photographers.Add(photographer);
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
 
-        var installation = await dbContext.LocalInstallations.SingleAsync();
+        var installation = await dbContext.LocalInstallations.SingleAsync(cancellationToken);
         var session = new CaptureSession
         {
             EventId = captureEvent.Id,
@@ -92,7 +95,7 @@ public sealed class CaptureDataStoreTests
             StartedAtUtc = now
         };
         dbContext.CaptureSessions.Add(session);
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         var captureSet = new CaptureSet
         {
@@ -102,7 +105,7 @@ public sealed class CaptureDataStoreTests
             StartedAtUtc = now
         };
         dbContext.CaptureSets.Add(captureSet);
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
         return captureSet;
     }
 
