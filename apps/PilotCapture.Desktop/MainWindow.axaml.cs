@@ -3,6 +3,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using PilotCapture.Application.Rosters;
+using System.Security.Cryptography;
 
 namespace PilotCapture.Desktop;
 
@@ -10,9 +11,17 @@ public sealed partial class MainWindow : Window
 {
     private RosterCsvDocument? _rosterDocument;
     private string? _rosterFileName;
+    private string? _rosterSha256;
     private bool _isPopulatingMappings;
+    private bool _hasImportedCurrentFile;
+    private readonly IRosterImportService _rosterImportService;
 
-    public MainWindow() => AvaloniaXamlLoader.Load(this);
+    public MainWindow(IRosterImportService rosterImportService)
+    {
+        _rosterImportService = rosterImportService;
+        AvaloniaXamlLoader.Load(this);
+        EventName.TextChanged += (_, _) => UpdateImportAvailability();
+    }
 
     private async void OnOpenRosterClick(object? sender, RoutedEventArgs e)
     {
@@ -32,8 +41,13 @@ public sealed partial class MainWindow : Window
         try
         {
             await using var stream = await files[0].OpenReadAsync();
-            _rosterDocument = RosterCsvReader.Read(stream);
+            using var bytes = new MemoryStream();
+            await stream.CopyToAsync(bytes);
+            var content = bytes.ToArray();
+            _rosterSha256 = Convert.ToHexString(SHA256.HashData(content));
+            _rosterDocument = RosterCsvReader.Read(new MemoryStream(content));
             _rosterFileName = files[0].Name;
+            _hasImportedCurrentFile = false;
 
             var suggestions = RosterColumnSuggestionBuilder.Build(_rosterDocument.Headers);
             _isPopulatingMappings = true;
@@ -51,17 +65,21 @@ public sealed partial class MainWindow : Window
         {
             _rosterDocument = null;
             _rosterFileName = null;
+            _rosterSha256 = null;
             RosterPreviewRows.ItemsSource = null;
             RosterSummary.Text = "The selected file could not be read as a roster CSV.";
             RosterWarnings.Text = exception.Message;
+            UpdateImportAvailability();
         }
         catch (IOException exception)
         {
             _rosterDocument = null;
             _rosterFileName = null;
+            _rosterSha256 = null;
             RosterPreviewRows.ItemsSource = null;
             RosterSummary.Text = "The selected file could not be opened.";
             RosterWarnings.Text = exception.Message;
+            UpdateImportAvailability();
         }
     }
 
@@ -84,6 +102,7 @@ public sealed partial class MainWindow : Window
             SelectedColumn(RosterNumberColumn),
             SelectedColumn(ClassOrCategoryColumn));
         var rows = RosterImportPreviewBuilder.Build(_rosterDocument, mapping);
+        PopulateMatchReview(rows);
         var warnings = initialWarnings.ToList();
         var mismatchedRows = rows.Count(row => !row.HasExpectedFieldCount);
         var possibleMatchRows = rows.Count(row => row.PotentialCrossGroupNameMatchCount > 0);
@@ -109,6 +128,80 @@ public sealed partial class MainWindow : Window
             var shape = row.HasExpectedFieldCount ? string.Empty : " · row width differs";
             return $"{row.SourceRecordNumber,3}. {name}  |  {group}  |  #{number}  |  {category}{match}{shape}";
         }).ToArray();
+        UpdateImportAvailability();
+    }
+
+    private async void OnImportRosterClick(object? sender, RoutedEventArgs e)
+    {
+        if (_rosterDocument is null || _rosterFileName is null || _rosterSha256 is null)
+            return;
+
+        try
+        {
+            var mapping = new RosterColumnMapping(
+                SelectedColumn(FirstNameColumn),
+                SelectedColumn(LastNameColumn),
+                SelectedColumn(TeamOrSchoolColumn),
+                SelectedColumn(SportOrGroupColumn),
+                SelectedColumn(RosterNumberColumn),
+                SelectedColumn(ClassOrCategoryColumn));
+            var rows = RosterImportPreviewBuilder.Build(_rosterDocument, mapping);
+            var confirmed = MatchReviewPanel.Children
+                .OfType<CheckBox>()
+                .Where(checkBox => checkBox.IsChecked == true)
+                .Select(checkBox => (string)checkBox.Tag!)
+                .ToHashSet(StringComparer.Ordinal);
+            var result = await _rosterImportService.ImportAsync(new RosterImportCommand(
+                EventName.Text ?? string.Empty,
+                _rosterFileName,
+                _rosterSha256,
+                rows,
+                confirmed));
+
+            RosterSummary.Text = $"Imported {result.RowsImported} of {result.RowsRead} roster rows into '{EventName.Text?.Trim()}'.";
+            RosterWarnings.Text = result.RowsSkipped == 0
+                ? "The event and roster are saved on this computer."
+                : $"The event and roster are saved on this computer. {result.RowsSkipped} row(s) were preserved in the import record but skipped because a name or group was blank.";
+            _hasImportedCurrentFile = true;
+            ImportRosterButton.IsEnabled = false;
+        }
+        catch (Exception exception)
+        {
+            RosterWarnings.Text = $"Roster import failed: {exception.Message}";
+        }
+    }
+
+    private void PopulateMatchReview(IReadOnlyList<RosterPreviewRow> rows)
+    {
+        var previouslyConfirmed = MatchReviewPanel.Children
+            .OfType<CheckBox>()
+            .Where(checkBox => checkBox.IsChecked == true)
+            .Select(checkBox => (string)checkBox.Tag!)
+            .ToHashSet(StringComparer.Ordinal);
+        MatchReviewPanel.Children.Clear();
+        foreach (var cluster in rows.Where(row => row.PotentialMatchKey is not null)
+                     .GroupBy(row => row.PotentialMatchKey!, StringComparer.Ordinal))
+        {
+            var entries = cluster.ToArray();
+            var groups = string.Join(", ", entries.Select(row => row.GroupName).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase));
+            var checkbox = new CheckBox
+            {
+                Content = $"Link {entries[0].DisplayName} across {groups} ({entries.Length} rows)",
+                Tag = cluster.Key,
+                IsChecked = previouslyConfirmed.Contains(cluster.Key)
+            };
+            MatchReviewPanel.Children.Add(checkbox);
+        }
+    }
+
+    private void UpdateImportAvailability()
+    {
+        var namesMapped = SelectedColumn(FirstNameColumn) is not null && SelectedColumn(LastNameColumn) is not null;
+        var groupMapped = SelectedColumn(TeamOrSchoolColumn) is not null || SelectedColumn(SportOrGroupColumn) is not null;
+        ImportRosterButton.IsEnabled = _rosterDocument is { Rows.Count: > 0 }
+            && !_hasImportedCurrentFile
+            && !string.IsNullOrWhiteSpace(EventName?.Text)
+            && namesMapped && groupMapped;
     }
 
     private static void SetOptions(ComboBox comboBox, IReadOnlyList<string> headers, int? selectedColumn)

@@ -68,6 +68,7 @@ public sealed record RosterPreviewRow(
     string? GroupName,
     string? RosterNumber,
     string? ClassOrCategory,
+    string? PotentialMatchKey,
     int PotentialCrossGroupNameMatchCount,
     bool HasExpectedFieldCount,
     string SourceDataJson);
@@ -129,6 +130,7 @@ public static class RosterImportPreviewBuilder
             string.IsNullOrWhiteSpace(candidate.GroupName) ? null : candidate.GroupName,
             candidate.RosterNumber,
             candidate.ClassOrCategory,
+            possibleMatches.ContainsKey(candidate.NormalizedName) ? candidate.NormalizedName : null,
             possibleMatches.GetValueOrDefault(candidate.NormalizedName),
             candidate.Row.HasExpectedFieldCount,
             candidate.Row.ToSourceDataJson())).ToArray();
@@ -159,4 +161,23 @@ public static class RosterImportPreviewBuilder
         string GroupName,
         string? RosterNumber,
         string? ClassOrCategory);
+}
+
+public sealed record RosterImportCommand(
+    string EventName,
+    string SourceFileName,
+    string SourceSha256,
+    IReadOnlyList<RosterPreviewRow> Rows,
+    IReadOnlySet<string> ConfirmedMatchKeys);
+
+public sealed record RosterImportResult(
+    string EventId,
+    string RosterImportId,
+    int RowsRead,
+    int RowsImported,
+    int RowsSkipped);
+
+public interface IRosterImportService
+{
+    Task<RosterImportResult> ImportAsync(RosterImportCommand command, CancellationToken cancellationToken = default);
 }

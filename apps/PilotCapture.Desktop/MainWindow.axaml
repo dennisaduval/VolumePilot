@@ -12,13 +12,17 @@
       </StackPanel>
     </Border>
 
-    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,*" Margin="24" RowSpacing="14">
-      <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,Auto,*" Margin="24" RowSpacing="14">
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="10">
         <StackPanel Spacing="5">
           <TextBlock Text="Roster intake" FontSize="26" FontWeight="SemiBold" />
-          <TextBlock Text="Select a CSV to inspect its rows and confirm the column suggestions. Preview does not save roster data." TextWrapping="Wrap" Opacity="0.75" />
+          <TextBlock Text="Review the column mapping and possible name matches before saving the roster locally." TextWrapping="Wrap" Opacity="0.75" />
         </StackPanel>
         <Button Grid.Column="1" x:Name="OpenRosterButton" Content="Choose roster CSV…" Padding="18,10" VerticalAlignment="Center" Click="OnOpenRosterClick" />
+        <TextBox Grid.Row="1" x:Name="EventName" Watermark="Event name (required)" />
+        <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button x:Name="ImportRosterButton" Content="Import roster" Padding="18,8" IsEnabled="False" Click="OnImportRosterClick" />
+        </StackPanel>
       </Grid>
 
       <Border Grid.Row="1" Padding="16" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
@@ -58,7 +62,16 @@
         <TextBlock x:Name="RosterWarnings" TextWrapping="Wrap" Foreground="#8A4B00" />
       </StackPanel>
 
-      <Border Grid.Row="3" Padding="12" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
+      <Border Grid.Row="3" Padding="12" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1" MaxHeight="140">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Review possible same-name matches (unchecked by default)" FontWeight="SemiBold" />
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="MatchReviewPanel" Spacing="3" />
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Row="4" Padding="12" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
           <ItemsControl x:Name="RosterPreviewRows">
             <ItemsControl.ItemTemplate>

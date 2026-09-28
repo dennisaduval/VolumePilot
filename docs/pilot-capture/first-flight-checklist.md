@@ -15,8 +15,9 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 ## First Flight workflow
 
 - [ ] Create/select an event.
-- [ ] Import a real CSV roster, preserving each source row and spelling.
-- [ ] Support multi-team/group association, including a subject with multiple memberships.
+- [x] Map, preview, and import a CSV roster locally, preserving each source row and spelling.
+- [x] Import multiple team/group associations and explicitly confirm any cross-group same-name subject link.
+- [ ] Verify the supplied sample roster imports with expected rows and memberships on Windows 11 Pro.
 - [ ] Select a known subject or create an unidentified subject from photographer input.
 - [ ] Connect a photographer/camera workflow and ingest JPEG files.
 - [ ] Store image files outside SQLite with generated asset-based paths and checksums.

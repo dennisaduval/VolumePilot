@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Data.Sqlite;
+using PilotCapture.Application.Rosters;
 
 namespace PilotCapture.Infrastructure.Persistence;
 
@@ -22,6 +23,7 @@ public static class InfrastructureRegistration
             options.UseSqlite(connectionString)
                 .AddInterceptors(new SqliteConnectionPolicy()));
         services.AddScoped<DatabaseInitializer>();
+        services.AddScoped<IRosterImportService, RosterImportService>();
         return services;
     }
 }

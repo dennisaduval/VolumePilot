@@ -155,6 +155,18 @@ public sealed class RosterImport
     public int RowsSkipped { get; set; }
 }
 
+/// <summary>Preserves every source record, including rows skipped during subject or membership creation.</summary>
+public sealed class RosterImportRow
+{
+    public string Id { get; set; } = Ids.New();
+    public string RosterImportId { get; set; } = string.Empty;
+    public RosterImport? RosterImport { get; set; }
+    public int SourceRecordNumber { get; set; }
+    public string? MembershipId { get; set; }
+    public Membership? Membership { get; set; }
+    public string SourceDataJson { get; set; } = string.Empty;
+}
+
 public sealed class AuditEntry
 {
     public string Id { get; set; } = Ids.New();

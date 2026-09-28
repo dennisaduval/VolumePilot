@@ -41,6 +41,8 @@ public sealed class RosterImportPreviewTests
         Assert.All(rows, row => Assert.Equal("12", row.RosterNumber));
         Assert.All(rows, row => Assert.Equal("Freshman", row.ClassOrCategory));
         Assert.All(rows, row => Assert.Equal("Alex Smith", row.DisplayName));
+        Assert.NotNull(rows[0].PotentialMatchKey);
+        Assert.Equal(rows[0].PotentialMatchKey, rows[1].PotentialMatchKey);
     }
 
     [Fact]

@@ -65,6 +65,7 @@ CaptureSet ── optional Membership
 - **Group** represents a team or other roster grouping within an event.
 - **Subject** represents a person or an unknown/unidentified person being photographed.
 - **Membership** associates a subject with a group and carries roster identity/number details. A subject can have memberships in multiple groups.
+- **RosterImportRow** preserves one original source record per CSV row, including skipped rows and repeated records that resolve to the same membership.
 - **CaptureSession** represents a bounded capture workflow at an event and station, with photographer and workflow profile context.
 - **CaptureSet** groups one or more images for a subject within a session and may point to the membership used for the capture.
 - **CaptureImage** is a relational record for one captured image and its review flags.
@@ -72,7 +73,7 @@ CaptureSet ── optional Membership
 
 All records use ULIDs stored as canonical lowercase text. Relationships are explicit foreign keys. Local event data uses restrictive deletes; a roster removal must not silently erase past capture history. Unrecognized people are represented explicitly, not inferred from a filename.
 
-Roster imports retain each original CSV row as source JSON on its membership, in addition to the import file name and checksum. Parsed display fields are stored for fast selection, while the original row preserves spelling and unmapped columns for audit and later mapping improvements.
+Roster imports retain every original CSV row as source JSON in a separate `RosterImportRow`, in addition to the import file name and checksum. This includes rows skipped because required name or group values are blank, and repeated rows that resolve to one subject/membership. Parsed display fields are stored for fast selection; the original row preserves spelling, blank values, and unmapped columns for audit and later mapping improvements. Exact-name matches across groups are unchecked review suggestions; only an operator-confirmed cluster shares one subject. All other rows create separate subjects, and roster numbers never identify people.
 
 ## Local storage and SQLite
 
@@ -111,8 +112,8 @@ docs/
 
 ## Implementation status
 
-The repository establishes the project structure, domain records, EF Core SQLite mappings, a versioned initial SQL schema, persistent installation identity, and an Avalonia desktop shell that initializes the local database. The first roster-intake increment adds a CSV reader that retains original headers and cell values, including duplicate or blank headers and rows whose field counts differ. The desktop now has a user-facing CSV preview screen with editable column mapping. Exact-name cross-group matches are flagged for review rather than merged automatically. The screen currently previews up to 20 rows and does not persist roster data; event/group/subject database import remains to be implemented. Tether/camera integration, image review, exports, and Windows packaging also remain outstanding. See the [First Flight checklist](first-flight-checklist.md) for per-feature status.
+The repository establishes the project structure, domain records, EF Core SQLite mappings, versioned SQL migrations, persistent installation identity, and an Avalonia desktop shell that initializes the local database. Roster intake reads quoted CSV data while retaining original headers and cells, including duplicate or blank headers and rows whose field counts differ. The desktop provides editable column mapping, a 20-row preview, and an import action that saves the event, groups, subjects, memberships, import metadata, and every source row locally. Exact-name cross-group matches remain unchecked until an operator confirms a cluster. Rows with blank name or group values remain preserved in the import record and are counted as skipped. Tether/camera integration, image review, exports, and Windows packaging remain outstanding. See the [First Flight checklist](first-flight-checklist.md) for per-feature status.
 
 ## Build
 
-Requires the .NET 10 SDK. From the repository root, restore and build with `dotnet build VolumePilot.sln`. The SQLite schema checks run with `python -m unittest discover -s tests -p 'test_*.py'`. The initial workspace did not include the SDK, so Windows build and runtime checks are still outstanding.
+Requires the .NET 10 SDK. From the repository root, restore and build with `dotnet build VolumePilot.sln`. The SQLite schema checks run with `python -m unittest discover -s tests -p 'test_*.py'`. Windows build and runtime validation are tracked in the First Flight checklist.
