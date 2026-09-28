@@ -134,6 +134,7 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
             entity.Property(x => x.Id).HasMaxLength(26);
             entity.Property(x => x.ReviewState).HasConversion<int>();
             entity.HasIndex(x => new { x.CaptureSetId, x.SequenceNumber }).IsUnique();
+            entity.HasIndex(x => x.CaptureSetId).IsUnique().HasFilter("is_primary = 1");
             entity.HasOne(x => x.CaptureSet).WithMany(x => x.Images).HasForeignKey(x => x.CaptureSetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.ImageAsset).WithOne().HasForeignKey<CaptureImage>(x => x.ImageAssetId).OnDelete(DeleteBehavior.Restrict);
         });

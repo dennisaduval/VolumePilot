@@ -58,6 +58,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             .Where(membership => membership.GroupId == groupId && membership.IsActive && membership.Subject!.IsActive)
             .OrderBy(membership => membership.Subject!.LastName)
             .ThenBy(membership => membership.Subject!.FirstName)
+            .ThenBy(membership => membership.Id)
             .Select(membership => new CaptureSubjectChoice(
                 membership.SubjectId,
                 membership.Id,
@@ -78,6 +79,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
                 session.Event!.Name,
                 session.Photographer!.DisplayName,
                 session.CaptureProfile!.Name,
+                session.CaptureProfile.WorkflowType,
                 session.StationCode,
                 session.StartedAtUtc,
                 null))
@@ -86,7 +88,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             return null;
 
         var currentSet = await dbContext.CaptureSets.AsNoTracking()
-            .Where(set => set.CaptureSessionId == activeSession.Id)
+            .Where(set => set.CaptureSessionId == activeSession.Id && set.CompletedAtUtc == null)
             .OrderByDescending(set => set.StartedAtUtc)
             .Select(set => new CaptureSetResult(set.Id, set.Subject!.DisplayName,
                 set.Subject!.IdentityStatus == SubjectIdentityStatus.Unidentified,
@@ -164,6 +166,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             captureEvent.Name,
             photographer.DisplayName,
             profile.Name,
+            workflowType,
             installation.StationCode,
             startedAt,
             null);
@@ -187,6 +190,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
 
         var subjectName = membership.Subject!.DisplayName;
         var startedAt = DateTimeOffset.UtcNow;
+        await CompleteCurrentCaptureSetAsync(session.Id, startedAt, cancellationToken);
 
         var captureSet = new CaptureSet
         {
@@ -225,6 +229,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         }
 
         var now = DateTimeOffset.UtcNow;
+        await CompleteCurrentCaptureSetAsync(session.Id, now, cancellationToken);
         var subject = new Subject
         {
             EventId = session.EventId,
@@ -257,13 +262,92 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         return new CaptureSetResult(captureSet.Id, subject.DisplayName, true, group?.Id, membership?.Id, now);
     }
 
+    public async Task<CaptureSetResult?> NextSubjectAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await dbContext.CaptureSessions.SingleOrDefaultAsync(
+            item => item.Id == sessionId && item.EndedAtUtc == null,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The active capture session was not found.");
+        var currentSet = await dbContext.CaptureSets.SingleOrDefaultAsync(
+            item => item.CaptureSessionId == session.Id && item.CompletedAtUtc == null,
+            cancellationToken);
+        if (currentSet is null)
+            return null;
+
+        CaptureSubjectChoice? nextSubject = null;
+        string? groupId = null;
+        if (currentSet.MembershipId is not null)
+        {
+            var currentMembership = await dbContext.Memberships.AsNoTracking().SingleOrDefaultAsync(
+                item => item.Id == currentSet.MembershipId,
+                cancellationToken);
+            if (currentMembership is not null)
+            {
+                groupId = currentMembership.GroupId;
+                var groupSubjects = await GetSubjectsAsync(currentMembership.GroupId, cancellationToken);
+                var currentIndex = -1;
+                for (var index = 0; index < groupSubjects.Count; index++)
+                {
+                    if (groupSubjects[index].MembershipId == currentMembership.Id)
+                    {
+                        currentIndex = index;
+                        break;
+                    }
+                }
+                if (currentIndex >= 0 && currentIndex + 1 < groupSubjects.Count)
+                    nextSubject = groupSubjects[currentIndex + 1];
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        currentSet.CompletedAtUtc = now;
+        if (nextSubject is null)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return null;
+        }
+
+        var nextCaptureSet = new CaptureSet
+        {
+            CaptureSessionId = session.Id,
+            SubjectId = nextSubject.SubjectId,
+            MembershipId = nextSubject.MembershipId,
+            StartedAtUtc = now
+        };
+        dbContext.CaptureSets.Add(nextCaptureSet);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new CaptureSetResult(
+            nextCaptureSet.Id,
+            nextSubject.DisplayName,
+            false,
+            groupId,
+            nextSubject.MembershipId,
+            now);
+    }
+
     public async Task EndSessionAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         var session = await dbContext.CaptureSessions.SingleOrDefaultAsync(
             item => item.Id == sessionId && item.EndedAtUtc == null,
             cancellationToken)
             ?? throw new InvalidOperationException("The active capture session was not found.");
-        session.EndedAtUtc = DateTimeOffset.UtcNow;
+        var endedAt = DateTimeOffset.UtcNow;
+        await CompleteCurrentCaptureSetAsync(session.Id, endedAt, cancellationToken);
+        session.EndedAtUtc = endedAt;
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task CompleteCurrentCaptureSetAsync(
+        string sessionId,
+        DateTimeOffset completedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var currentSets = await dbContext.CaptureSets
+            .Where(set => set.CaptureSessionId == sessionId && set.CompletedAtUtc == null)
+            .ToListAsync(cancellationToken);
+        foreach (var set in currentSets)
+            set.CompletedAtUtc = completedAtUtc;
     }
 }

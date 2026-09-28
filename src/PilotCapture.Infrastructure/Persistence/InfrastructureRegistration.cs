@@ -32,6 +32,7 @@ public static class InfrastructureRegistration
         services.AddSingleton<IImageAssetStore>(_ => new FileSystemImageAssetStore(mediaRootPath));
         services.AddScoped<ICaptureDataStore, CaptureDataStore>();
         services.AddScoped<IImageIngestService, ImageIngestService>();
+        services.AddScoped<IImageReviewService, ImageReviewService>();
         return services;
     }
 }

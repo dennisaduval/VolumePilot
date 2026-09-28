@@ -114,6 +114,7 @@ public sealed class CaptureSet
     public string? MembershipId { get; set; }
     public Membership? Membership { get; set; }
     public DateTimeOffset StartedAtUtc { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
     public ICollection<CaptureImage> Images { get; set; } = new List<CaptureImage>();
 }
 
@@ -125,6 +126,8 @@ public sealed class CaptureImage
     public string ImageAssetId { get; set; } = string.Empty;
     public ImageAsset? ImageAsset { get; set; }
     public CaptureImageReviewState ReviewState { get; set; } = CaptureImageReviewState.Pending;
+    public bool IsPrimary { get; set; }
+    public bool IsBanner { get; set; }
     public int SequenceNumber { get; set; }
     public DateTimeOffset CapturedAtUtc { get; set; }
 }

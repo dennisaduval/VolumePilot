@@ -5,7 +5,29 @@ namespace PilotCapture.Application;
 public interface ICaptureDataStore
 {
     Task AddImageAsync(CaptureImage image, ImageAsset asset, CancellationToken cancellationToken);
-    Task SaveReviewStateAsync(string captureImageId, CaptureImageReviewState reviewState, CancellationToken cancellationToken);
+    Task ApplyReviewActionAsync(string captureImageId, CaptureImageReviewAction action, CancellationToken cancellationToken);
+}
+
+public enum CaptureImageReviewAction
+{
+    SetPrimary = 0,
+    ToggleBanner = 1,
+    Reject = 2
+}
+
+public sealed record CaptureImageReviewItem(
+    string Id,
+    string RelativePath,
+    string OriginalFileName,
+    int SequenceNumber,
+    CaptureImageReviewState ReviewState,
+    bool IsPrimary,
+    bool IsBanner);
+
+public interface IImageReviewService
+{
+    Task<IReadOnlyList<CaptureImageReviewItem>> GetImagesAsync(string captureSetId, CancellationToken cancellationToken = default);
+    Task ApplyActionAsync(string captureImageId, CaptureImageReviewAction action, CancellationToken cancellationToken = default);
 }
 
 public interface IImageAssetStore

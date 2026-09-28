@@ -15,9 +15,8 @@ public enum CaptureWorkflowType
 public enum CaptureImageReviewState
 {
     Pending = 0,
-    Primary = 1,
-    Banner = 2,
-    Rejected = 3
+    Accepted = 1,
+    Rejected = 2
 }
 
 public enum ImageAssetState

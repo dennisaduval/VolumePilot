@@ -1,6 +1,8 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using PilotCapture.Application;
@@ -21,6 +23,14 @@ public sealed partial class MainWindow : Window
     private readonly IRosterImportService _rosterImportService;
     private readonly ICaptureWorkflowService _captureWorkflowService;
     private readonly IImageIngestService _imageIngestService;
+    private readonly IImageReviewService _imageReviewService;
+    private readonly IImageAssetStore _imageAssetStore;
+    private readonly WindowsPortraitFaceDetector _faceDetector;
+    private readonly SemaphoreSlim _captureOperationLock = new(1, 1);
+    private IReadOnlyList<CaptureImageReviewRow> _captureImageRows = [];
+    private Bitmap? _selectedReviewBitmap;
+    private CroppedBitmap? _selectedFaceCrop;
+    private bool _isPopulatingReviewImages;
     private ActiveCaptureSession? _activeCaptureSession;
     private bool _isPopulatingCaptureChoices;
     private DispatcherTimer? _imageScanTimer;
@@ -31,11 +41,17 @@ public sealed partial class MainWindow : Window
     public MainWindow(
         IRosterImportService rosterImportService,
         ICaptureWorkflowService captureWorkflowService,
-        IImageIngestService imageIngestService)
+        IImageIngestService imageIngestService,
+        IImageReviewService imageReviewService,
+        IImageAssetStore imageAssetStore,
+        WindowsPortraitFaceDetector faceDetector)
     {
         _rosterImportService = rosterImportService;
         _captureWorkflowService = captureWorkflowService;
         _imageIngestService = imageIngestService;
+        _imageReviewService = imageReviewService;
+        _imageAssetStore = imageAssetStore;
+        _faceDetector = faceDetector;
         AvaloniaXamlLoader.Load(this);
         EventName.TextChanged += (_, _) => UpdateImportAvailability();
         PhotographerName.TextChanged += (_, _) => UpdateCaptureControls();
@@ -46,7 +62,13 @@ public sealed partial class MainWindow : Window
         foreach (var stationCode in new[] { "s10", "s20", "s30", "s40" })
             StationCodeCombo.Items.Add(new ComboBoxItem { Content = stationCode, Tag = stationCode });
         Loaded += async (_, _) => await LoadCaptureSetupAsync();
-        Closed += (_, _) => StopImageMonitoring();
+        Closed += (_, _) =>
+        {
+            StopImageMonitoring();
+            ClearSelectedReviewPreview();
+            foreach (var row in _captureImageRows)
+                row.Thumbnail.Dispose();
+        };
     }
 
     private async void OnOpenRosterClick(object? sender, RoutedEventArgs e)
@@ -271,6 +293,7 @@ public sealed partial class MainWindow : Window
 
             UpdateCaptureControls();
             await RefreshCaptureGroupsAsync(_activeCaptureSession?.CurrentCaptureSet?.GroupId);
+            await RefreshReviewImagesAsync();
         }
         catch (Exception exception)
         {
@@ -368,8 +391,11 @@ public sealed partial class MainWindow : Window
             return;
 
         _isScanningImageFolder = true;
+        await _captureOperationLock.WaitAsync();
         try
         {
+            var hasNewImages = false;
+            string? latestNewCaptureImageId = null;
             var files = Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
                 .Where(path => Path.GetExtension(path).Equals(".jpg", StringComparison.OrdinalIgnoreCase)
                     || Path.GetExtension(path).Equals(".jpeg", StringComparison.OrdinalIgnoreCase))
@@ -397,7 +423,11 @@ public sealed partial class MainWindow : Window
                         break;
                     _observedSourceVersions.Add(sourceVersion);
                     if (!result.AlreadyImported)
+                    {
+                        hasNewImages = true;
+                        latestNewCaptureImageId = result.CaptureImageId;
                         ImageIngestStatus.Text = $"Imported {result.OriginalFileName} as image {result.SequenceNumber + 1} for {captureSet.SubjectName}. Source kept intact.";
+                    }
                 }
                 catch (IOException)
                 {
@@ -414,6 +444,8 @@ public sealed partial class MainWindow : Window
                     ImageIngestStatus.Text = $"Skipped {Path.GetFileName(fullPath)}: {exception.Message}";
                 }
             }
+            if (hasNewImages && _activeCaptureSession?.CurrentCaptureSet?.CaptureSetId == captureSet.CaptureSetId)
+                await RefreshReviewImagesAsync(latestNewCaptureImageId);
         }
         catch (Exception exception)
         {
@@ -421,6 +453,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            _captureOperationLock.Release();
             _isScanningImageFolder = false;
         }
     }
@@ -436,6 +469,229 @@ public sealed partial class MainWindow : Window
     {
         var file = new FileInfo(path);
         return $"{Path.GetFullPath(path)}|{file.Length}|{file.LastWriteTimeUtc.Ticks}";
+    }
+
+    private async void OnReviewImageSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isPopulatingReviewImages || CaptureImagesList.SelectedItem is not CaptureImageReviewRow selected)
+            return;
+        await ShowSelectedReviewImageAsync(selected);
+    }
+
+    private async Task RefreshReviewImagesAsync(string? selectedImageId = null)
+    {
+        var captureSet = _activeCaptureSession?.CurrentCaptureSet;
+        ReviewSubjectTitle.Text = captureSet is null ? "Image review" : $"Image review · {captureSet.SubjectName}";
+        ClearSelectedReviewPreview();
+        foreach (var oldRow in _captureImageRows)
+            oldRow.Thumbnail.Dispose();
+
+        if (captureSet is null)
+        {
+            _captureImageRows = [];
+            _isPopulatingReviewImages = true;
+            CaptureImagesList.ItemsSource = _captureImageRows;
+            CaptureImagesList.SelectedItem = null;
+            _isPopulatingReviewImages = false;
+            ReviewStatus.Text = "Select a subject in Capture to begin. Imported originals remain unchanged.";
+            UpdateReviewControls();
+            return;
+        }
+
+        try
+        {
+            var items = await _imageReviewService.GetImagesAsync(captureSet.CaptureSetId);
+            var rows = new List<CaptureImageReviewRow>(items.Count);
+            foreach (var item in items)
+            {
+                await using var assetStream = await _imageAssetStore.OpenReadAsync(item.RelativePath, CancellationToken.None);
+                var thumbnail = Bitmap.DecodeToHeight(assetStream, 112, BitmapInterpolationMode.HighQuality);
+                rows.Add(new CaptureImageReviewRow(item, thumbnail));
+            }
+
+            _captureImageRows = rows;
+            _isPopulatingReviewImages = true;
+            CaptureImagesList.ItemsSource = _captureImageRows;
+            var selected = rows.FirstOrDefault(row => row.Id == selectedImageId)
+                ?? rows.FirstOrDefault(row => row.IsPrimary)
+                ?? rows.FirstOrDefault();
+            CaptureImagesList.SelectedItem = selected;
+            _isPopulatingReviewImages = false;
+            ReviewStatus.Text = rows.Count == 0
+                ? "No images yet. Start monitoring in Capture, then photograph this subject."
+                : $"{rows.Count} image(s). Primary and Banner are independent; rejected images stay in the set for the record.";
+            UpdateReviewControls();
+            if (selected is not null)
+                await ShowSelectedReviewImageAsync(selected);
+        }
+        catch (Exception exception)
+        {
+            _isPopulatingReviewImages = false;
+            ReviewStatus.Text = $"Images could not be loaded: {exception.Message}";
+            UpdateReviewControls();
+        }
+    }
+
+    private async Task ShowSelectedReviewImageAsync(CaptureImageReviewRow selected)
+    {
+        ClearSelectedReviewPreview();
+        try
+        {
+            await using var assetStream = await _imageAssetStore.OpenReadAsync(selected.RelativePath, CancellationToken.None);
+            using var buffer = new MemoryStream();
+            await assetStream.CopyToAsync(buffer);
+            var jpegBytes = buffer.ToArray();
+            using (var imageStream = new MemoryStream(jpegBytes, writable: false))
+                _selectedReviewBitmap = new Bitmap(imageStream);
+
+            SelectedImageStatus.Text = $"{selected.OriginalFileName} · image {selected.SequenceNumber + 1}"
+                + (selected.IsPrimary ? " · Primary" : string.Empty)
+                + (selected.IsBanner ? " · Banner" : string.Empty)
+                + (selected.ReviewState == CaptureImageReviewState.Rejected ? " · Rejected" : string.Empty);
+
+            if (_activeCaptureSession?.WorkflowType == CaptureWorkflowType.Portrait)
+            {
+                Rect? face;
+                var faceDetectionUnavailable = false;
+                try
+                {
+                    face = await _faceDetector.DetectLargestFaceAsync(jpegBytes);
+                }
+                catch
+                {
+                    face = null;
+                    faceDetectionUnavailable = true;
+                }
+                if (face is { } faceBox)
+                {
+                    _selectedFaceCrop = new CroppedBitmap(
+                        _selectedReviewBitmap,
+                        CreateExpandedFaceCrop(_selectedReviewBitmap.PixelSize, faceBox));
+                    SelectedImagePreview.Source = _selectedFaceCrop;
+                    SelectedImageStatus.Text += " · on-device face crop";
+                }
+                else
+                {
+                    SelectedImagePreview.Source = _selectedReviewBitmap;
+                    SelectedImageStatus.Text += faceDetectionUnavailable
+                        ? " · face detection unavailable; showing full image"
+                        : " · no face detected; showing full image";
+                }
+            }
+            else
+            {
+                SelectedImagePreview.Source = _selectedReviewBitmap;
+                SelectedImageStatus.Text += " · action workflow";
+            }
+
+            UpdateReviewControls();
+        }
+        catch (Exception exception)
+        {
+            SelectedImagePreview.Source = null;
+            SelectedImageStatus.Text = $"Preview unavailable: {exception.Message}";
+        }
+    }
+
+    private static PixelRect CreateExpandedFaceCrop(PixelSize imageSize, Rect normalizedFace)
+    {
+        var faceX = normalizedFace.X * imageSize.Width;
+        var faceY = normalizedFace.Y * imageSize.Height;
+        var faceWidth = normalizedFace.Width * imageSize.Width;
+        var faceHeight = normalizedFace.Height * imageSize.Height;
+        var left = Math.Clamp((int)Math.Floor(faceX - faceWidth * 0.55), 0, imageSize.Width - 1);
+        var top = Math.Clamp((int)Math.Floor(faceY - faceHeight * 0.75), 0, imageSize.Height - 1);
+        var right = Math.Clamp((int)Math.Ceiling(faceX + faceWidth * 1.55), left + 1, imageSize.Width);
+        var bottom = Math.Clamp((int)Math.Ceiling(faceY + faceHeight * 1.55), top + 1, imageSize.Height);
+        return new PixelRect(left, top, right - left, bottom - top);
+    }
+
+    private async void OnSetPrimaryClick(object? sender, RoutedEventArgs e) =>
+        await ApplyReviewActionAsync(CaptureImageReviewAction.SetPrimary);
+
+    private async void OnToggleBannerClick(object? sender, RoutedEventArgs e) =>
+        await ApplyReviewActionAsync(CaptureImageReviewAction.ToggleBanner);
+
+    private async void OnRejectImageClick(object? sender, RoutedEventArgs e) =>
+        await ApplyReviewActionAsync(CaptureImageReviewAction.Reject);
+
+    private async Task ApplyReviewActionAsync(CaptureImageReviewAction action)
+    {
+        if (CaptureImagesList.SelectedItem is not CaptureImageReviewRow selected)
+            return;
+
+        await _captureOperationLock.WaitAsync();
+        try
+        {
+            await _imageReviewService.ApplyActionAsync(selected.Id, action);
+            await RefreshReviewImagesAsync(selected.Id);
+        }
+        catch (Exception exception)
+        {
+            ReviewStatus.Text = $"The image review change could not be saved: {exception.Message}";
+        }
+        finally
+        {
+            _captureOperationLock.Release();
+        }
+    }
+
+    private async void OnNextSubjectClick(object? sender, RoutedEventArgs e)
+    {
+        var activeSession = _activeCaptureSession;
+        if (activeSession?.CurrentCaptureSet is null)
+            return;
+
+        await _captureOperationLock.WaitAsync();
+        try
+        {
+            var nextCaptureSet = await _captureWorkflowService.NextSubjectAsync(activeSession.Id);
+            _observedSourceVersions.Clear();
+            if (nextCaptureSet is null)
+            {
+                StopImageMonitoring();
+                _activeCaptureSession = activeSession with { CurrentCaptureSet = null };
+                CaptureSubjectCombo.SelectedItem = null;
+                SelectedCaptureSubject.Text = "This subject is complete. Select another rostered subject or create an unidentified subject.";
+            }
+            else
+            {
+                _activeCaptureSession = activeSession with { CurrentCaptureSet = nextCaptureSet };
+                await RefreshCaptureGroupsAsync(nextCaptureSet.GroupId);
+                SelectedCaptureSubject.Text = $"Selected {nextCaptureSet.SubjectName}. Ready for this subject's images.";
+            }
+
+            UpdateCaptureControls();
+            await RefreshReviewImagesAsync();
+            MainTabs.SelectedItem = ImageReviewTab;
+        }
+        catch (Exception exception)
+        {
+            ReviewStatus.Text = $"Could not move to the next subject: {exception.Message}";
+        }
+        finally
+        {
+            _captureOperationLock.Release();
+        }
+    }
+
+    private void ClearSelectedReviewPreview()
+    {
+        SelectedImagePreview.Source = null;
+        _selectedFaceCrop?.Dispose();
+        _selectedFaceCrop = null;
+        _selectedReviewBitmap?.Dispose();
+        _selectedReviewBitmap = null;
+    }
+
+    private void UpdateReviewControls()
+    {
+        var selected = CaptureImagesList.SelectedItem as CaptureImageReviewRow;
+        SetPrimaryButton.IsEnabled = selected is not null;
+        ToggleBannerButton.IsEnabled = selected is not null;
+        RejectImageButton.IsEnabled = selected is not null;
+        NextSubjectButton.IsEnabled = _activeCaptureSession?.CurrentCaptureSet is not null;
+        ToggleBannerButton.Content = selected?.IsBanner == true ? "Remove Banner" : "Mark Banner";
     }
 
     private async Task RefreshCaptureGroupsAsync(string? selectedGroupId = null)
@@ -478,6 +734,7 @@ public sealed partial class MainWindow : Window
                 PhotographerName.Text ?? string.Empty,
                 workflowType);
             UpdateCaptureControls();
+            await RefreshReviewImagesAsync();
         }
         catch (Exception exception)
         {
@@ -490,6 +747,7 @@ public sealed partial class MainWindow : Window
         var activeSession = _activeCaptureSession;
         if (activeSession is null)
             return;
+        await _captureOperationLock.WaitAsync();
         try
         {
             await _captureWorkflowService.EndSessionAsync(activeSession.Id);
@@ -497,10 +755,15 @@ public sealed partial class MainWindow : Window
             _activeCaptureSession = null;
             SelectedCaptureSubject.Text = "No subject selected.";
             UpdateCaptureControls();
+            await RefreshReviewImagesAsync();
         }
         catch (Exception exception)
         {
             SessionStatus.Text = $"Session could not end: {exception.Message}";
+        }
+        finally
+        {
+            _captureOperationLock.Release();
         }
     }
 
@@ -509,6 +772,7 @@ public sealed partial class MainWindow : Window
         var activeSession = _activeCaptureSession;
         if (activeSession is null || SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not { } subject)
             return;
+        await _captureOperationLock.WaitAsync();
         try
         {
             var captureSet = await _captureWorkflowService.SelectSubjectAsync(activeSession.Id, subject.MembershipId);
@@ -517,10 +781,15 @@ public sealed partial class MainWindow : Window
             if (_activeCaptureSession?.Id == activeSession.Id)
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
             UpdateCaptureControls();
+            await RefreshReviewImagesAsync();
         }
         catch (Exception exception)
         {
             SelectedCaptureSubject.Text = $"Subject could not be selected: {exception.Message}";
+        }
+        finally
+        {
+            _captureOperationLock.Release();
         }
     }
 
@@ -529,6 +798,7 @@ public sealed partial class MainWindow : Window
         var activeSession = _activeCaptureSession;
         if (activeSession is null)
             return;
+        await _captureOperationLock.WaitAsync();
         try
         {
             var group = SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo);
@@ -542,10 +812,15 @@ public sealed partial class MainWindow : Window
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
             UpdateCaptureControls();
             UnidentifiedSubjectName.Text = string.Empty;
+            await RefreshReviewImagesAsync();
         }
         catch (Exception exception)
         {
             SelectedCaptureSubject.Text = $"Subject could not be created: {exception.Message}";
+        }
+        finally
+        {
+            _captureOperationLock.Release();
         }
     }
 
@@ -603,5 +878,29 @@ public sealed partial class MainWindow : Window
             .Where(value => !string.IsNullOrWhiteSpace(value));
         var suffix = string.Join(" · ", details);
         return suffix.Length == 0 ? subject.DisplayName : $"{subject.DisplayName} · {suffix}";
+    }
+
+    private sealed class CaptureImageReviewRow(CaptureImageReviewItem item, Bitmap thumbnail)
+    {
+        public string Id => item.Id;
+        public string RelativePath => item.RelativePath;
+        public string OriginalFileName => item.OriginalFileName;
+        public int SequenceNumber => item.SequenceNumber;
+        public bool IsPrimary => item.IsPrimary;
+        public bool IsBanner => item.IsBanner;
+        public CaptureImageReviewState ReviewState => item.ReviewState;
+        public Bitmap Thumbnail { get; } = thumbnail;
+        public string Caption
+        {
+            get
+            {
+                var flags = new List<string>();
+                if (IsPrimary) flags.Add("Primary");
+                if (IsBanner) flags.Add("Banner");
+                if (ReviewState == CaptureImageReviewState.Rejected) flags.Add("Rejected");
+                var details = flags.Count == 0 ? "Pending" : string.Join(" · ", flags);
+                return $"{SequenceNumber + 1}. {OriginalFileName}\n{details}";
+            }
+        }
     }
 }
