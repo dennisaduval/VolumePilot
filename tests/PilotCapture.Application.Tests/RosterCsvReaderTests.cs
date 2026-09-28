@@ -30,7 +30,7 @@ public sealed class RosterCsvReaderTests
 
         var result = RosterCsvReader.Read(input);
         var row = Assert.Single(result.Rows);
-        var source = JsonSerializer.Deserialize<RosterCsvCell[]>(row.ToSourceDataJson());!;
+        var source = Assert.IsType<RosterCsvCell[]>(JsonSerializer.Deserialize<RosterCsvCell[]>(row.ToSourceDataJson()));
 
         Assert.Equal(" Alice ", source[0].Value);
         Assert.Equal("Name", source[0].Header);
