@@ -66,6 +66,7 @@ public sealed class LocalInstallation
     // Created once at first run and retained for the lifetime of this local installation.
     public string InstallationId { get; private set; } = Ids.New();
     public string StationCode { get; set; } = "s10";
+    public string? SmartShooterOutputPath { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public static LocalInstallation Create(string stationCode, DateTimeOffset createdAtUtc)
@@ -132,6 +133,8 @@ public sealed class ImageAsset
 {
     public string Id { get; set; } = Ids.New();
     public string RelativePath { get; set; } = string.Empty;
+    public string? SourcePath { get; set; }
+    public DateTimeOffset? SourceLastWriteUtc { get; set; }
     public string OriginalFileName { get; set; } = string.Empty;
     public string MediaType { get; set; } = "image/jpeg";
     public long ByteLength { get; set; }

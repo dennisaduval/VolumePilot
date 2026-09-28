@@ -2,6 +2,8 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using PilotCapture.Application;
 using PilotCapture.Application.Capture;
 using PilotCapture.Application.Rosters;
 using PilotCapture.Domain;
@@ -18,13 +20,22 @@ public sealed partial class MainWindow : Window
     private bool _hasImportedCurrentFile;
     private readonly IRosterImportService _rosterImportService;
     private readonly ICaptureWorkflowService _captureWorkflowService;
+    private readonly IImageIngestService _imageIngestService;
     private ActiveCaptureSession? _activeCaptureSession;
     private bool _isPopulatingCaptureChoices;
+    private DispatcherTimer? _imageScanTimer;
+    private bool _isScanningImageFolder;
+    private bool _isMonitoringImageFolder;
+    private readonly HashSet<string> _observedSourceVersions = new(StringComparer.OrdinalIgnoreCase);
 
-    public MainWindow(IRosterImportService rosterImportService, ICaptureWorkflowService captureWorkflowService)
+    public MainWindow(
+        IRosterImportService rosterImportService,
+        ICaptureWorkflowService captureWorkflowService,
+        IImageIngestService imageIngestService)
     {
         _rosterImportService = rosterImportService;
         _captureWorkflowService = captureWorkflowService;
+        _imageIngestService = imageIngestService;
         AvaloniaXamlLoader.Load(this);
         EventName.TextChanged += (_, _) => UpdateImportAvailability();
         PhotographerName.TextChanged += (_, _) => UpdateCaptureControls();
@@ -35,6 +46,7 @@ public sealed partial class MainWindow : Window
         foreach (var stationCode in new[] { "s10", "s20", "s30", "s40" })
             StationCodeCombo.Items.Add(new ComboBoxItem { Content = stationCode, Tag = stationCode });
         Loaded += async (_, _) => await LoadCaptureSetupAsync();
+        Closed += (_, _) => StopImageMonitoring();
     }
 
     private async void OnOpenRosterClick(object? sender, RoutedEventArgs e)
@@ -240,6 +252,7 @@ public sealed partial class MainWindow : Window
             var events = await _captureWorkflowService.GetEventsAsync();
             _activeCaptureSession = await _captureWorkflowService.GetActiveSessionAsync();
             var stationCode = _activeCaptureSession?.StationCode ?? await _captureWorkflowService.GetStationCodeAsync();
+            SmartShooterFolderPath.Text = await _captureWorkflowService.GetSmartShooterOutputPathAsync() ?? string.Empty;
             _isPopulatingCaptureChoices = true;
             SetChoices(CaptureEventCombo, events, item => item.Name, _activeCaptureSession?.EventId);
             StationCodeCombo.SelectedItem = StationCodeCombo.Items
@@ -289,6 +302,140 @@ public sealed partial class MainWindow : Window
         {
             SessionStatus.Text = $"Station code could not be saved: {exception.Message}";
         }
+    }
+
+    private async void OnChooseSmartShooterFolderClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose Smart Shooter 5's JPEG output folder",
+            AllowMultiple = false
+        });
+        if (folders.Count == 0)
+            return;
+
+        try
+        {
+            var path = folders[0].Path.LocalPath;
+            await _captureWorkflowService.SetSmartShooterOutputPathAsync(path);
+            SmartShooterFolderPath.Text = path;
+            _observedSourceVersions.Clear();
+            ImageIngestStatus.Text = "Output folder saved. Start monitoring after selecting a capture subject. Source files will be left in this folder.";
+            UpdateCaptureControls();
+        }
+        catch (Exception exception)
+        {
+            ImageIngestStatus.Text = $"Output folder could not be saved: {exception.Message}";
+        }
+    }
+
+    private void OnMonitorFolderClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isMonitoringImageFolder)
+        {
+            StopImageMonitoring();
+            ImageIngestStatus.Text = "Smart Shooter folder monitoring is paused. Imported source files remain in place.";
+            UpdateCaptureControls();
+            return;
+        }
+
+        var path = SmartShooterFolderPath.Text;
+        if (_activeCaptureSession?.CurrentCaptureSet is null || string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            ImageIngestStatus.Text = "Choose a Smart Shooter folder and select a subject before starting monitoring.";
+            return;
+        }
+
+        _isMonitoringImageFolder = true;
+        _imageScanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _imageScanTimer.Tick += OnImageScanTick;
+        _imageScanTimer.Start();
+        ImageIngestStatus.Text = $"Monitoring {path} for JPEGs newer than the current subject selection. Original files are not changed or deleted.";
+        UpdateCaptureControls();
+        _ = ScanSmartShooterFolderAsync();
+    }
+
+    private async void OnImageScanTick(object? sender, EventArgs e) => await ScanSmartShooterFolderAsync();
+
+    private async Task ScanSmartShooterFolderAsync()
+    {
+        if (_isScanningImageFolder || !_isMonitoringImageFolder)
+            return;
+        var session = _activeCaptureSession;
+        var captureSet = session?.CurrentCaptureSet;
+        var folder = SmartShooterFolderPath.Text;
+        if (session is null || captureSet is null || string.IsNullOrWhiteSpace(folder))
+            return;
+
+        _isScanningImageFolder = true;
+        try
+        {
+            var files = Directory.EnumerateFiles(folder, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => Path.GetExtension(path).Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+                    || Path.GetExtension(path).Equals(".jpeg", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(File.GetLastWriteTimeUtc)
+                .ToArray();
+            foreach (var path in files)
+            {
+                if (_activeCaptureSession?.CurrentCaptureSet?.CaptureSetId != captureSet.CaptureSetId)
+                    break;
+
+                var fullPath = Path.GetFullPath(path);
+                var sourceVersion = GetSourceVersionKey(fullPath);
+                if (_observedSourceVersions.Contains(sourceVersion))
+                    continue;
+                if (File.GetLastWriteTimeUtc(fullPath) < captureSet.StartedAtUtc.UtcDateTime)
+                {
+                    _observedSourceVersions.Add(sourceVersion);
+                    continue;
+                }
+
+                try
+                {
+                    var result = await _imageIngestService.ImportJpegAsync(session.Id, captureSet.CaptureSetId, fullPath);
+                    if (_activeCaptureSession?.CurrentCaptureSet?.CaptureSetId != captureSet.CaptureSetId)
+                        break;
+                    _observedSourceVersions.Add(sourceVersion);
+                    if (!result.AlreadyImported)
+                        ImageIngestStatus.Text = $"Imported {result.OriginalFileName} as image {result.SequenceNumber + 1} for {captureSet.SubjectName}. Source kept intact.";
+                }
+                catch (IOException)
+                {
+                    // Smart Shooter may still be writing this file. Retry it on the next scan.
+                }
+                catch (InvalidDataException exception)
+                {
+                    _observedSourceVersions.Add(sourceVersion);
+                    ImageIngestStatus.Text = $"Skipped {Path.GetFileName(fullPath)}: {exception.Message}";
+                }
+                catch (InvalidOperationException exception)
+                {
+                    _observedSourceVersions.Add(sourceVersion);
+                    ImageIngestStatus.Text = $"Skipped {Path.GetFileName(fullPath)}: {exception.Message}";
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            ImageIngestStatus.Text = $"Smart Shooter folder scan failed: {exception.Message}";
+        }
+        finally
+        {
+            _isScanningImageFolder = false;
+        }
+    }
+
+    private void StopImageMonitoring()
+    {
+        _imageScanTimer?.Stop();
+        _imageScanTimer = null;
+        _isMonitoringImageFolder = false;
+    }
+
+    private static string GetSourceVersionKey(string path)
+    {
+        var file = new FileInfo(path);
+        return $"{Path.GetFullPath(path)}|{file.Length}|{file.LastWriteTimeUtc.Ticks}";
     }
 
     private async Task RefreshCaptureGroupsAsync(string? selectedGroupId = null)
@@ -346,6 +493,7 @@ public sealed partial class MainWindow : Window
         try
         {
             await _captureWorkflowService.EndSessionAsync(activeSession.Id);
+            StopImageMonitoring();
             _activeCaptureSession = null;
             SelectedCaptureSubject.Text = "No subject selected.";
             UpdateCaptureControls();
@@ -365,8 +513,10 @@ public sealed partial class MainWindow : Window
         {
             var captureSet = await _captureWorkflowService.SelectSubjectAsync(activeSession.Id, subject.MembershipId);
             SelectedCaptureSubject.Text = $"Selected {captureSet.SubjectName}. Ready for this subject's images.";
+            _observedSourceVersions.Clear();
             if (_activeCaptureSession?.Id == activeSession.Id)
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
+            UpdateCaptureControls();
         }
         catch (Exception exception)
         {
@@ -387,8 +537,10 @@ public sealed partial class MainWindow : Window
                 UnidentifiedSubjectName.Text ?? string.Empty,
                 group?.Id);
             SelectedCaptureSubject.Text = $"Selected unidentified subject: {captureSet.SubjectName}. Ready for this subject's images.";
+            _observedSourceVersions.Clear();
             if (_activeCaptureSession?.Id == activeSession.Id)
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
+            UpdateCaptureControls();
             UnidentifiedSubjectName.Text = string.Empty;
         }
         catch (Exception exception)
@@ -408,6 +560,10 @@ public sealed partial class MainWindow : Window
         PhotographerName.IsEnabled = !active;
         WorkflowTypeCombo.IsEnabled = !active;
         StationCodeCombo.IsEnabled = !active;
+        MonitorFolderButton.IsEnabled = _isMonitoringImageFolder
+            || (active && _activeCaptureSession?.CurrentCaptureSet is not null
+                && !string.IsNullOrWhiteSpace(SmartShooterFolderPath.Text));
+        MonitorFolderButton.Content = _isMonitoringImageFolder ? "Stop monitoring" : "Start monitoring";
         SelectSubjectButton.IsEnabled = active && SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not null;
         CreateUnidentifiedButton.IsEnabled = active && !string.IsNullOrWhiteSpace(UnidentifiedSubjectName.Text);
         CaptureGroupCombo.IsEnabled = CaptureGroupCombo.Items.Count > 0;

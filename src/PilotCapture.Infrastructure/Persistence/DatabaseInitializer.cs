@@ -27,7 +27,7 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
         await using var readVersion = connection.CreateCommand();
         readVersion.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations;";
         var currentVersion = Convert.ToInt32(await readVersion.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
-        if (currentVersion >= 2)
+        if (currentVersion >= 3)
         {
             await EnsureLocalInstallationAsync(cancellationToken);
             return;
@@ -61,6 +61,22 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
             }
 
             await MarkMigrationAsync(connection, transaction, 2, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            currentVersion = 2;
+        }
+
+        if (currentVersion < 3)
+        {
+            var migrationSql = await ReadMigrationAsync("0003_smart_shooter_source_paths.sql", cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using (var migrate = connection.CreateCommand())
+            {
+                migrate.Transaction = transaction;
+                migrate.CommandText = migrationSql;
+                await migrate.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await MarkMigrationAsync(connection, transaction, 3, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
 

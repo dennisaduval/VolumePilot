@@ -87,6 +87,7 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
             entity.HasKey(x => x.InstallationId);
             entity.Property(x => x.InstallationId).HasMaxLength(26);
             entity.Property(x => x.StationCode).HasMaxLength(3).IsRequired();
+            entity.Property(x => x.SmartShooterOutputPath).HasMaxLength(2000);
         });
 
         modelBuilder.Entity<CaptureProfile>(entity =>
@@ -143,11 +144,15 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Id).HasMaxLength(26);
             entity.Property(x => x.RelativePath).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.SourcePath).HasMaxLength(2000).UseCollation("NOCASE");
+            entity.Property(x => x.SourceLastWriteUtc).HasColumnName("source_last_write_utc");
             entity.Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
             entity.Property(x => x.MediaType).HasMaxLength(100).IsRequired();
             entity.Property(x => x.Sha256).HasMaxLength(64);
             entity.Property(x => x.State).HasConversion<int>();
             entity.HasIndex(x => x.RelativePath).IsUnique();
+            entity.HasIndex(x => new { x.SourcePath, x.SourceLastWriteUtc }).IsUnique()
+                .HasFilter("source_path IS NOT NULL AND source_last_write_utc IS NOT NULL");
             entity.HasIndex(x => x.Sha256);
         });
 
