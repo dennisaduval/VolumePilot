@@ -23,6 +23,7 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [x] Connect Smart Shooter 5's local JPEG output folder and ingest stable JPEG files into the selected capture set.
 - [x] Copy image files outside SQLite with generated asset-based paths and SHA-256 checksums while preserving source files.
 - [x] Store JPEG pixel dimensions when available and show dimensions plus file size in image review for camera-output monitoring.
+- [x] Warn when JPEG dimensions vary within a capture set while treating portrait/landscape rotations as the same output size.
 - [x] Persist the image asset and capture image association together in SQLite with stable source-path/timestamp duplicate protection; skip files older than the selected capture set.
 - [x] Add an audit entry in the same SQLite transaction as each image ingest.
 - [x] Show an immediate on-device face crop and thumbnails for portrait workflows; show the full image for action workflows and fall back to the full image if detection fails.

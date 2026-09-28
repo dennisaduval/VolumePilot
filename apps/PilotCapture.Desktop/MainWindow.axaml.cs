@@ -557,9 +557,14 @@ public sealed partial class MainWindow : Window
                 ?? rows.FirstOrDefault();
             CaptureImagesList.SelectedItem = selected;
             _isPopulatingReviewImages = false;
+            var observedSizes = ImageDimensionMonitor.GetDistinctCaptureSizes(
+                rows.Select(row => (row.PixelWidth, row.PixelHeight)));
+            var dimensionWarning = observedSizes.Count > 1
+                ? $" Camera output warning: mixed JPEG dimensions detected ({string.Join(", ", observedSizes.Select(size => $"{size.Width:N0} × {size.Height:N0}"))}). Verify the Smart Shooter image-size setting."
+                : string.Empty;
             ReviewStatus.Text = rows.Count == 0
                 ? "No images yet. Start monitoring in Capture, then photograph this subject."
-                : $"{rows.Count} image(s). Primary and Banner are independent; rejected images stay in the set for the record.";
+                : $"{rows.Count} image(s). Primary and Banner are independent; rejected images stay in the set for the record.{dimensionWarning}";
             UpdateReviewControls();
             if (selected is not null)
                 await ShowSelectedReviewImageAsync(selected);
