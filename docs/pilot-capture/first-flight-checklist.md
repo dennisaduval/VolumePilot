@@ -11,7 +11,8 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [x] Persist a local installation ID and initialize station `s10`.
 - [x] Apply the VolumePilot color system and establish 48-pixel minimum touch targets for the desktop controls.
 - [ ] Build and launch on Windows 11 Pro.
-- [ ] Confirm the agreed package versions restore and publish successfully.
+- [x] Add a Windows x64 preview-package workflow that records version, commit, build time, and SHA-256.
+- [ ] Confirm the preview package restores, publishes, and launches successfully on Windows 11 Pro.
 
 ## First Flight workflow
 
@@ -40,4 +41,4 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [ ] Validate portrait face crops and the no-detection fallback with pilot images on Windows 11 hardware.
 - [ ] Run an actual multi-team capture offline from setup through export.
 - [ ] Verify restart recovery and missing-file reporting.
-- [ ] Package a pilot installer and record build/version information.
+- [ ] Test the preview package on the target laptops, then choose and package the final installer/update approach.
