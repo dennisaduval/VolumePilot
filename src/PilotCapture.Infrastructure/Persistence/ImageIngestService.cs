@@ -57,6 +57,29 @@ public sealed class ImageIngestService(
             captureSet.Id,
             fullSourcePath,
             cancellationToken);
+        // StoreJpegAsync waits for Smart Shooter to finish writing the file. Use
+        // the settled timestamp as the idempotency key, not the timestamp seen
+        // when the folder scan first noticed a still-growing file.
+        var settledSourceLastWriteUtc = new DateTimeOffset(File.GetLastWriteTimeUtc(fullSourcePath), TimeSpan.Zero);
+        if (settledSourceLastWriteUtc != sourceLastWriteUtc)
+        {
+            var settledDuplicate = await FindExistingImageAsync(
+                fullSourcePath,
+                settledSourceLastWriteUtc,
+                cancellationToken);
+            if (settledDuplicate is not null)
+            {
+                await assetStore.DeleteAsync(stored.RelativePath, CancellationToken.None);
+                return settledDuplicate;
+            }
+        }
+
+        if (settledSourceLastWriteUtc < captureSet.StartedAtUtc)
+        {
+            await assetStore.DeleteAsync(stored.RelativePath, CancellationToken.None);
+            throw new InvalidOperationException("This file predates the selected subject's capture set and was skipped.");
+        }
+
         var sequence = ((await dbContext.CaptureImages.AsNoTracking()
             .Where(image => image.CaptureSetId == captureSet.Id)
             .OrderByDescending(image => image.SequenceNumber)
@@ -67,7 +90,7 @@ public sealed class ImageIngestService(
             Id = stored.ImageAssetId,
             RelativePath = stored.RelativePath,
             SourcePath = fullSourcePath,
-            SourceLastWriteUtc = sourceLastWriteUtc,
+            SourceLastWriteUtc = settledSourceLastWriteUtc,
             OriginalFileName = stored.OriginalFileName,
             MediaType = "image/jpeg",
             ByteLength = stored.ByteLength,
@@ -122,5 +145,27 @@ public sealed class ImageIngestService(
     {
         var fullFolderPath = Path.GetFullPath(folderPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         return filePath.StartsWith(fullFolderPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<ImageIngestResult?> FindExistingImageAsync(
+        string sourcePath,
+        DateTimeOffset sourceLastWriteUtc,
+        CancellationToken cancellationToken)
+    {
+        var existingAsset = await dbContext.ImageAssets.AsNoTracking()
+            .SingleOrDefaultAsync(asset => asset.SourcePath == sourcePath
+                && asset.SourceLastWriteUtc == sourceLastWriteUtc, cancellationToken);
+        if (existingAsset is null)
+            return null;
+
+        var existingImage = await dbContext.CaptureImages.AsNoTracking()
+            .SingleOrDefaultAsync(image => image.ImageAssetId == existingAsset.Id, cancellationToken)
+            ?? throw new InvalidOperationException("The previously imported image has no capture record.");
+        return new ImageIngestResult(
+            existingImage.Id,
+            existingAsset.OriginalFileName,
+            existingAsset.Sha256 ?? string.Empty,
+            existingImage.SequenceNumber,
+            true);
     }
 }
