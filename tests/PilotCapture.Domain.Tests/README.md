@@ -1,6 +1,6 @@
 # Pilot Capture tests
 
-The `PilotCapture.Application.Tests` project contains executable checks for roster CSV parsing, including quoted delimiters, multiline fields, UTF-8 BOMs, and lossless preservation of irregular columns.
+The `PilotCapture.Application.Tests` project contains executable checks for roster CSV parsing, including quoted delimiters, multiline fields, UTF-8 BOMs, lossless preservation of irregular columns, header suggestions, and cross-group duplicate-name review flags.
 
 Planned domain checks for the 0.1 milestone:
 

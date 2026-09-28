@@ -100,7 +100,7 @@ docs/
 
 ## Implementation status
 
-The repository establishes the project structure, domain records, EF Core SQLite mappings, a versioned initial SQL schema, persistent installation identity, and an Avalonia desktop shell that initializes the local database. The first roster-intake increment adds a CSV reader that retains original headers and cell values, including duplicate or blank headers and rows whose field counts differ. Event/group/subject mapping, persistence, and the preview UI remain to be implemented. Tether/camera integration, image review, exports, and Windows packaging also remain outstanding. See the [First Flight checklist](first-flight-checklist.md) for per-feature status.
+The repository establishes the project structure, domain records, EF Core SQLite mappings, a versioned initial SQL schema, persistent installation identity, and an Avalonia desktop shell that initializes the local database. The first roster-intake increment adds a CSV reader that retains original headers and cell values, including duplicate or blank headers and rows whose field counts differ. Header suggestions and an in-memory preview model are being built with exact-name cross-group matches flagged for review rather than merged automatically. Database persistence and the user-facing mapping/preview screen remain to be implemented. Tether/camera integration, image review, exports, and Windows packaging also remain outstanding. See the [First Flight checklist](first-flight-checklist.md) for per-feature status.
 
 ## Build
 
