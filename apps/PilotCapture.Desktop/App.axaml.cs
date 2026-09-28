@@ -32,7 +32,9 @@ public sealed partial class App : Avalonia.Application
             }
 
             _windowScope = _serviceProvider.CreateScope();
-            desktop.MainWindow = new MainWindow(_windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>());
+            desktop.MainWindow = new MainWindow(
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>());
             desktop.Exit += (_, _) =>
             {
                 _windowScope?.Dispose();
