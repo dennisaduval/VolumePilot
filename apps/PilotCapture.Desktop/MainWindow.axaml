@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PilotCapture.Desktop.MainWindow"
+        Title="Pilot Capture"
+        Width="1200" Height="760"
+        MinWidth="960" MinHeight="640">
+  <Grid RowDefinitions="Auto,*" ColumnDefinitions="*">
+    <Border Grid.Row="0" Padding="24,16" Background="#232323">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <TextBlock Text="PILOT CAPTURE" FontSize="18" FontWeight="Bold" Foreground="White" />
+        <TextBlock Text="0.1 · First Flight" VerticalAlignment="Center" Foreground="#D0D0D0" />
+      </StackPanel>
+    </Border>
+    <Grid Grid.Row="1" RowDefinitions="*,Auto" Margin="28">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" MaxWidth="620">
+        <TextBlock Text="Capture, even offline." FontSize="30" FontWeight="SemiBold" HorizontalAlignment="Center" />
+        <TextBlock Text="Local event setup, roster import, subject selection, and image review are coming together here. Your event records will be stored on this computer." TextWrapping="Wrap" TextAlignment="Center" FontSize="16" Opacity="0.78" />
+        <TextBlock Text="Initial desktop shell" HorizontalAlignment="Center" Margin="0,14,0,0" Opacity="0.55" />
+      </StackPanel>
+      <TextBlock Grid.Row="1" Text="Offline-first • Local SQLite storage" HorizontalAlignment="Center" Opacity="0.6" />
+    </Grid>
+  </Grid>
+</Window>

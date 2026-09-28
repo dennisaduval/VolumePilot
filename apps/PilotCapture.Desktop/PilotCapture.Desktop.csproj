@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <ProjectReference Include="..\..\src\PilotCapture.Domain\PilotCapture.Domain.csproj" />
+    <ProjectReference Include="..\..\src\PilotCapture.Application\PilotCapture.Application.csproj" />
+    <ProjectReference Include="..\..\src\PilotCapture.Infrastructure\PilotCapture.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
