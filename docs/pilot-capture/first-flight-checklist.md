@@ -14,11 +14,12 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 
 ## First Flight workflow
 
-- [ ] Create/select an event.
+- [x] Import and select a local event.
 - [x] Map, preview, and import a CSV roster locally, preserving each source row and spelling.
 - [x] Import multiple team/group associations and explicitly confirm any cross-group same-name subject link.
 - [ ] Verify the supplied sample roster imports with expected rows and memberships on Windows 11 Pro.
-- [ ] Select a known subject or create an unidentified subject from photographer input.
+- [x] Start a session with a photographer, workflow profile, and persistent station code.
+- [x] Select a rostered membership or create an unidentified subject; resume the active session and selected capture set after restart.
 - [ ] Connect a photographer/camera workflow and ingest JPEG files.
 - [ ] Store image files outside SQLite with generated asset-based paths and checksums.
 - [ ] Persist subject, membership, session, image, and audit associations in one recoverable workflow.

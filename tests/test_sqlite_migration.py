@@ -75,9 +75,25 @@ class InitialMigrationTests(unittest.TestCase):
         )
         with self.assertRaises(sqlite3.IntegrityError):
             self.connection.execute(
+                "INSERT INTO capture_sessions(id, event_id, capture_profile_id, photographer_id, installation_id, station_code, started_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("L" * 26, ids["A"], ids["F"], ids["G"], ids["H"], "s50", "2026-09-28T00:00:00Z"),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.connection.execute(
                 "INSERT INTO capture_sets(id, capture_session_id, subject_id, membership_id, started_at_utc) VALUES (?, ?, ?, ?, ?)",
                 ("J" * 26, session_id, ids["D"], ids["E"], "2026-09-28T00:00:00Z"),
             )
+        self.connection.execute(
+            "UPDATE subjects SET identity_status = 1, display_name = 'Walk-in 1' WHERE id = ?",
+            (ids["D"],),
+        )
+        self.connection.execute(
+            "INSERT INTO capture_sets(id, capture_session_id, subject_id, membership_id, started_at_utc) VALUES (?, ?, ?, NULL, ?)",
+            ("M" * 26, session_id, ids["D"], "2026-09-28T00:01:00Z"),
+        )
+        self.assertIsNone(self.connection.execute(
+            "SELECT membership_id FROM capture_sets WHERE id = ?", ("M" * 26,)
+        ).fetchone()[0])
 
     def test_station_codes_are_limited_to_the_agreed_values(self):
         with self.assertRaises(sqlite3.IntegrityError):

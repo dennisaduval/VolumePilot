@@ -2,7 +2,9 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using PilotCapture.Application.Capture;
 using PilotCapture.Application.Rosters;
+using PilotCapture.Domain;
 using System.Security.Cryptography;
 
 namespace PilotCapture.Desktop;
@@ -15,12 +17,24 @@ public sealed partial class MainWindow : Window
     private bool _isPopulatingMappings;
     private bool _hasImportedCurrentFile;
     private readonly IRosterImportService _rosterImportService;
+    private readonly ICaptureWorkflowService _captureWorkflowService;
+    private ActiveCaptureSession? _activeCaptureSession;
+    private bool _isPopulatingCaptureChoices;
 
-    public MainWindow(IRosterImportService rosterImportService)
+    public MainWindow(IRosterImportService rosterImportService, ICaptureWorkflowService captureWorkflowService)
     {
         _rosterImportService = rosterImportService;
+        _captureWorkflowService = captureWorkflowService;
         AvaloniaXamlLoader.Load(this);
         EventName.TextChanged += (_, _) => UpdateImportAvailability();
+        PhotographerName.TextChanged += (_, _) => UpdateCaptureControls();
+        UnidentifiedSubjectName.TextChanged += (_, _) => UpdateCaptureControls();
+        WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Portrait", Tag = CaptureWorkflowType.Portrait });
+        WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Action", Tag = CaptureWorkflowType.Action });
+        WorkflowTypeCombo.SelectedIndex = 0;
+        foreach (var stationCode in new[] { "s10", "s20", "s30", "s40" })
+            StationCodeCombo.Items.Add(new ComboBoxItem { Content = stationCode, Tag = stationCode });
+        Loaded += async (_, _) => await LoadCaptureSetupAsync();
     }
 
     private async void OnOpenRosterClick(object? sender, RoutedEventArgs e)
@@ -164,6 +178,7 @@ public sealed partial class MainWindow : Window
                 : $"The event and roster are saved on this computer. {result.RowsSkipped} row(s) were preserved in the import record but skipped because a name or group was blank.";
             _hasImportedCurrentFile = true;
             ImportRosterButton.IsEnabled = false;
+            await LoadCaptureSetupAsync();
         }
         catch (Exception exception)
         {
@@ -217,4 +232,220 @@ public sealed partial class MainWindow : Window
 
     private static int? SelectedColumn(ComboBox comboBox) =>
         comboBox.SelectedIndex > 0 ? comboBox.SelectedIndex - 1 : null;
+
+    private async Task LoadCaptureSetupAsync()
+    {
+        try
+        {
+            var events = await _captureWorkflowService.GetEventsAsync();
+            _activeCaptureSession = await _captureWorkflowService.GetActiveSessionAsync();
+            var stationCode = _activeCaptureSession?.StationCode ?? await _captureWorkflowService.GetStationCodeAsync();
+            _isPopulatingCaptureChoices = true;
+            SetChoices(CaptureEventCombo, events, item => item.Name, _activeCaptureSession?.EventId);
+            StationCodeCombo.SelectedItem = StationCodeCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, stationCode, StringComparison.Ordinal));
+            _isPopulatingCaptureChoices = false;
+
+            if (_activeCaptureSession is not null)
+            {
+                PhotographerName.Text = _activeCaptureSession.PhotographerName;
+                var workflowName = _activeCaptureSession.ProfileName;
+                WorkflowTypeCombo.SelectedIndex = workflowName.Equals("Action", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                if (_activeCaptureSession.CurrentCaptureSet is { } currentSet)
+                    SelectedCaptureSubject.Text = $"Resumed with {currentSet.SubjectName} selected. Ready for this subject's images.";
+            }
+
+            UpdateCaptureControls();
+            await RefreshCaptureGroupsAsync(_activeCaptureSession?.CurrentCaptureSet?.GroupId);
+        }
+        catch (Exception exception)
+        {
+            SessionStatus.Text = $"Capture setup could not load: {exception.Message}";
+        }
+    }
+
+    private async void OnCaptureEventChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_isPopulatingCaptureChoices)
+            await RefreshCaptureGroupsAsync();
+    }
+
+    private async void OnCaptureGroupChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_isPopulatingCaptureChoices)
+            await RefreshCaptureSubjectsAsync();
+    }
+
+    private async void OnStationCodeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_isPopulatingCaptureChoices || StationCodeCombo.SelectedItem is not ComboBoxItem { Tag: string stationCode })
+            return;
+        try
+        {
+            await _captureWorkflowService.SetStationCodeAsync(stationCode);
+        }
+        catch (Exception exception)
+        {
+            SessionStatus.Text = $"Station code could not be saved: {exception.Message}";
+        }
+    }
+
+    private async Task RefreshCaptureGroupsAsync(string? selectedGroupId = null)
+    {
+        var selectedEvent = SelectedChoice<CaptureEventChoice>(CaptureEventCombo);
+        var groups = selectedEvent is null
+            ? Array.Empty<CaptureGroupChoice>()
+            : await _captureWorkflowService.GetGroupsAsync(selectedEvent.Id);
+        _isPopulatingCaptureChoices = true;
+        SetChoices(CaptureGroupCombo, groups, item => item.Name,
+            selectedGroupId ?? _activeCaptureSession?.CurrentCaptureSet?.GroupId);
+        _isPopulatingCaptureChoices = false;
+        await RefreshCaptureSubjectsAsync();
+    }
+
+    private async Task RefreshCaptureSubjectsAsync()
+    {
+        var selectedGroup = SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo);
+        var subjects = selectedGroup is null
+            ? Array.Empty<CaptureSubjectChoice>()
+            : await _captureWorkflowService.GetSubjectsAsync(selectedGroup.Id);
+        _isPopulatingCaptureChoices = true;
+        SetChoices(CaptureSubjectCombo, subjects, item => FormatSubject(item),
+            _activeCaptureSession?.CurrentCaptureSet?.MembershipId);
+        _isPopulatingCaptureChoices = false;
+        UpdateCaptureControls();
+    }
+
+    private async void OnStartSessionClick(object? sender, RoutedEventArgs e)
+    {
+        var selectedEvent = SelectedChoice<CaptureEventChoice>(CaptureEventCombo);
+        if (selectedEvent is null || WorkflowTypeCombo.SelectedItem is not ComboBoxItem workflowItem
+            || workflowItem.Tag is not CaptureWorkflowType workflowType)
+            return;
+
+        try
+        {
+            _activeCaptureSession = await _captureWorkflowService.StartSessionAsync(
+                selectedEvent.Id,
+                PhotographerName.Text ?? string.Empty,
+                workflowType);
+            UpdateCaptureControls();
+        }
+        catch (Exception exception)
+        {
+            SessionStatus.Text = $"Session could not start: {exception.Message}";
+        }
+    }
+
+    private async void OnEndSessionClick(object? sender, RoutedEventArgs e)
+    {
+        var activeSession = _activeCaptureSession;
+        if (activeSession is null)
+            return;
+        try
+        {
+            await _captureWorkflowService.EndSessionAsync(activeSession.Id);
+            _activeCaptureSession = null;
+            SelectedCaptureSubject.Text = "No subject selected.";
+            UpdateCaptureControls();
+        }
+        catch (Exception exception)
+        {
+            SessionStatus.Text = $"Session could not end: {exception.Message}";
+        }
+    }
+
+    private async void OnSelectSubjectClick(object? sender, RoutedEventArgs e)
+    {
+        var activeSession = _activeCaptureSession;
+        if (activeSession is null || SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not { } subject)
+            return;
+        try
+        {
+            var captureSet = await _captureWorkflowService.SelectSubjectAsync(activeSession.Id, subject.MembershipId);
+            SelectedCaptureSubject.Text = $"Selected {captureSet.SubjectName}. Ready for this subject's images.";
+            if (_activeCaptureSession?.Id == activeSession.Id)
+                _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
+        }
+        catch (Exception exception)
+        {
+            SelectedCaptureSubject.Text = $"Subject could not be selected: {exception.Message}";
+        }
+    }
+
+    private async void OnCreateUnidentifiedClick(object? sender, RoutedEventArgs e)
+    {
+        var activeSession = _activeCaptureSession;
+        if (activeSession is null)
+            return;
+        try
+        {
+            var group = SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo);
+            var captureSet = await _captureWorkflowService.CreateUnidentifiedSubjectAsync(
+                activeSession.Id,
+                UnidentifiedSubjectName.Text ?? string.Empty,
+                group?.Id);
+            SelectedCaptureSubject.Text = $"Selected unidentified subject: {captureSet.SubjectName}. Ready for this subject's images.";
+            if (_activeCaptureSession?.Id == activeSession.Id)
+                _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
+            UnidentifiedSubjectName.Text = string.Empty;
+        }
+        catch (Exception exception)
+        {
+            SelectedCaptureSubject.Text = $"Subject could not be created: {exception.Message}";
+        }
+    }
+
+    private void UpdateCaptureControls()
+    {
+        var active = _activeCaptureSession is not null;
+        StartSessionButton.IsEnabled = !active
+            && SelectedChoice<CaptureEventChoice>(CaptureEventCombo) is not null
+            && !string.IsNullOrWhiteSpace(PhotographerName.Text);
+        EndSessionButton.IsEnabled = active;
+        CaptureEventCombo.IsEnabled = !active;
+        PhotographerName.IsEnabled = !active;
+        WorkflowTypeCombo.IsEnabled = !active;
+        StationCodeCombo.IsEnabled = !active;
+        SelectSubjectButton.IsEnabled = active && SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not null;
+        CreateUnidentifiedButton.IsEnabled = active && !string.IsNullOrWhiteSpace(UnidentifiedSubjectName.Text);
+        CaptureGroupCombo.IsEnabled = CaptureGroupCombo.Items.Count > 0;
+        CaptureSubjectCombo.IsEnabled = CaptureSubjectCombo.Items.Count > 0;
+        SessionStatus.Text = _activeCaptureSession is { } activeSession
+            ? $"Active: {activeSession.EventName} · {activeSession.PhotographerName} · {activeSession.ProfileName} · station {activeSession.StationCode}. This session resumes after restart."
+            : "No active capture session.";
+    }
+
+    private static void SetChoices<T>(ComboBox comboBox, IEnumerable<T> choices, Func<T, string> label, string? selectedId)
+    {
+        comboBox.Items.Clear();
+        foreach (var choice in choices)
+            comboBox.Items.Add(new ComboBoxItem { Content = label(choice), Tag = choice });
+        var items = comboBox.Items.OfType<ComboBoxItem>().ToArray();
+        comboBox.SelectedItem = items.FirstOrDefault(item => GetChoiceId(item.Tag)?.Equals(selectedId, StringComparison.Ordinal) == true)
+            ?? items.FirstOrDefault();
+    }
+
+    private static T? SelectedChoice<T>(ComboBox comboBox) where T : class =>
+        (comboBox.SelectedItem as ComboBoxItem)?.Tag as T;
+
+    private static string? GetChoiceId(object? choice) => choice switch
+    {
+        CaptureEventChoice item => item.Id,
+        CaptureGroupChoice item => item.Id,
+        CaptureSubjectChoice item => item.MembershipId,
+        _ => null
+    };
+
+    private static string? SelectedStationCode(ComboBox comboBox) =>
+        (comboBox.SelectedItem as ComboBoxItem)?.Tag as string;
+
+    private static string FormatSubject(CaptureSubjectChoice subject)
+    {
+        var details = new[] { subject.RosterNumber, subject.Role }
+            .Where(value => !string.IsNullOrWhiteSpace(value));
+        var suffix = string.Join(" · ", details);
+        return suffix.Length == 0 ? subject.DisplayName : $"{subject.DisplayName} · {suffix}";
+    }
 }
