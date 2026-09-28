@@ -26,6 +26,7 @@ public sealed partial class App : Avalonia.Application
             services.AddPilotCaptureInfrastructure(
                 Path.Combine(appDataPath, "pilot-capture.db"),
                 Path.Combine(appDataPath, "media"));
+            services.AddSingleton<WindowsPortraitFaceDetector>();
             _serviceProvider = services.BuildServiceProvider();
             using (var scope = _serviceProvider.CreateScope())
             {
@@ -37,7 +38,10 @@ public sealed partial class App : Avalonia.Application
             desktop.MainWindow = new MainWindow(
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>());
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageReviewService>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
+                _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>());
             desktop.Exit += (_, _) =>
             {
                 _windowScope?.Dispose();

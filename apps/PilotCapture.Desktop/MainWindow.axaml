@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:PilotCapture.Desktop"
         x:Class="PilotCapture.Desktop.MainWindow"
         Title="Pilot Capture"
         Width="1200" Height="760"
@@ -12,7 +13,7 @@
       </StackPanel>
     </Border>
 
-    <TabControl Grid.Row="1" Margin="24">
+    <TabControl x:Name="MainTabs" Grid.Row="1" Margin="24">
       <TabItem Header="Roster">
       <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="14">
       <Grid Grid.Row="0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="10">
@@ -21,7 +22,7 @@
           <TextBlock Text="Review the column mapping and possible name matches before saving the roster locally." TextWrapping="Wrap" Opacity="0.75" />
         </StackPanel>
         <Button Grid.Column="1" x:Name="OpenRosterButton" Content="Choose roster CSV…" Padding="18,10" VerticalAlignment="Center" Click="OnOpenRosterClick" />
-        <TextBox Grid.Row="1" x:Name="EventName" Watermark="Event name (required)" />
+        <TextBox Grid.Row="1" x:Name="EventName" PlaceholderText="Event name (required)" />
         <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
           <Button x:Name="ImportRosterButton" Content="Import roster" Padding="18,8" IsEnabled="False" Click="OnImportRosterClick" />
         </StackPanel>
@@ -106,7 +107,7 @@
               </StackPanel>
               <StackPanel Grid.Row="0" Grid.Column="2" Spacing="4">
                 <TextBlock Text="Photographer" />
-                <TextBox x:Name="PhotographerName" Watermark="Photographer name" />
+                <TextBox x:Name="PhotographerName" PlaceholderText="Photographer name" />
               </StackPanel>
               <Button Grid.Row="0" Grid.Column="3" x:Name="StartSessionButton" Content="Start session" Padding="16,8" VerticalAlignment="Bottom" Click="OnStartSessionClick" />
 
@@ -127,7 +128,7 @@
             <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
               <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
                 <TextBlock Text="Smart Shooter 5 JPEG output folder" FontWeight="SemiBold" />
-                <TextBox x:Name="SmartShooterFolderPath" IsReadOnly="True" Watermark="Choose the folder Smart Shooter writes JPEGs into" />
+              <TextBox x:Name="SmartShooterFolderPath" IsReadOnly="True" PlaceholderText="Choose the folder Smart Shooter writes JPEGs into" />
               </StackPanel>
               <Button Grid.Row="0" Grid.Column="1" Content="Choose folder…" Padding="14,8" VerticalAlignment="Bottom" Click="OnChooseSmartShooterFolderClick" />
               <Button Grid.Row="0" Grid.Column="2" x:Name="MonitorFolderButton" Content="Start monitoring" Padding="14,8" VerticalAlignment="Bottom" IsEnabled="False" Click="OnMonitorFolderClick" />
@@ -147,12 +148,46 @@
             <Border Grid.Column="1" Padding="16" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
               <StackPanel Spacing="10">
                 <TextBlock Text="Unidentified subject" FontSize="18" FontWeight="SemiBold" />
-                <TextBox x:Name="UnidentifiedSubjectName" Watermark="Temporary label, such as Walk-in 1" />
+                <TextBox x:Name="UnidentifiedSubjectName" PlaceholderText="Temporary label, such as Walk-in 1" />
                 <Button x:Name="CreateUnidentifiedButton" Content="Create and select" IsEnabled="False" Padding="14,8" HorizontalAlignment="Left" Click="OnCreateUnidentifiedClick" />
                 <TextBlock Text="This creates an explicitly unidentified subject; no roster or filename matching is used." TextWrapping="Wrap" Opacity="0.75" />
               </StackPanel>
             </Border>
           </Grid>
+        </Grid>
+      </TabItem>
+
+      <TabItem x:Name="ImageReviewTab" Header="Image review">
+        <Grid ColumnDefinitions="230,*" RowDefinitions="Auto,Auto,*" ColumnSpacing="14" RowSpacing="12" Margin="12">
+          <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Spacing="4">
+            <TextBlock x:Name="ReviewSubjectTitle" Text="Image review" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock x:Name="ReviewStatus" Text="Select a subject in Capture to begin. Imported originals remain unchanged." TextWrapping="Wrap" Opacity="0.78" />
+          </StackPanel>
+
+          <ListBox x:Name="CaptureImagesList" Grid.Row="1" Grid.RowSpan="2" Grid.Column="0" SelectionChanged="OnReviewImageSelectionChanged" ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="local:CaptureImageReviewRow">
+                <StackPanel Width="194" Spacing="5" Margin="4">
+                  <Image Source="{Binding Thumbnail}" Height="118" Stretch="Uniform" />
+                  <TextBlock Text="{Binding Caption}" TextWrapping="Wrap" FontSize="12" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="SetPrimaryButton" Content="Set Primary" Padding="14,8" IsEnabled="False" Click="OnSetPrimaryClick" />
+            <Button x:Name="ToggleBannerButton" Content="Mark Banner" Padding="14,8" IsEnabled="False" Click="OnToggleBannerClick" />
+            <Button x:Name="RejectImageButton" Content="Reject" Padding="14,8" IsEnabled="False" Click="OnRejectImageClick" />
+            <Button x:Name="NextSubjectButton" Content="Next subject" Padding="14,8" IsEnabled="False" Click="OnNextSubjectClick" />
+          </StackPanel>
+
+          <Border Grid.Row="2" Grid.Column="1" Padding="10" CornerRadius="8" BorderBrush="#D0D0D0" BorderThickness="1">
+            <Grid RowDefinitions="*,Auto" RowSpacing="8">
+              <Image x:Name="SelectedImagePreview" Stretch="Uniform" />
+              <TextBlock Grid.Row="1" x:Name="SelectedImageStatus" Text="Choose a thumbnail to preview." TextWrapping="Wrap" Opacity="0.78" />
+            </Grid>
+          </Border>
         </Grid>
       </TabItem>
     </TabControl>

@@ -24,14 +24,15 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [x] Copy image files outside SQLite with generated asset-based paths and SHA-256 checksums while preserving source files.
 - [x] Persist the image asset and capture image association together in SQLite with source-path duplicate protection.
 - [ ] Add audit entries for image ingest.
-- [ ] Show immediate face crop and thumbnails for portrait workflows; omit face review for action workflows.
-- [ ] Implement Primary, Banner, Reject, and Next review actions.
+- [x] Show an immediate on-device face crop and thumbnails for portrait workflows; show the full image for action workflows and fall back to the full image if detection fails.
+- [x] Implement independent Primary and Banner roles, Reject, and Next subject actions with persistent local state.
 - [ ] Verify saved state after closing and reopening the application.
 - [ ] Export image-to-subject associations for operational review.
 
 ## Release validation
 
 - [ ] Test a clean Windows 11 Pro installation.
+- [ ] Validate portrait face crops and the no-detection fallback with pilot images on Windows 11 hardware.
 - [ ] Run an actual multi-team capture offline from setup through export.
 - [ ] Verify restart recovery and missing-file reporting.
 - [ ] Package a pilot installer and record build/version information.

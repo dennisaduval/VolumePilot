@@ -7,6 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "src" / "PilotCapture.Infrastructure" / "Persistence" / "Migrations" / "0001_initial.sql"
 ROSTER_ROWS_MIGRATION = ROOT / "src" / "PilotCapture.Infrastructure" / "Persistence" / "Migrations" / "0002_roster_import_rows.sql"
 SMART_SHOOTER_MIGRATION = ROOT / "src" / "PilotCapture.Infrastructure" / "Persistence" / "Migrations" / "0003_smart_shooter_source_paths.sql"
+IMAGE_REVIEW_MIGRATION = ROOT / "src" / "PilotCapture.Infrastructure" / "Persistence" / "Migrations" / "0004_image_review_roles.sql"
 
 
 class InitialMigrationTests(unittest.TestCase):
@@ -19,6 +20,7 @@ class InitialMigrationTests(unittest.TestCase):
         self.connection.executescript(MIGRATION.read_text(encoding="utf-8"))
         self.connection.executescript(ROSTER_ROWS_MIGRATION.read_text(encoding="utf-8"))
         self.connection.executescript(SMART_SHOOTER_MIGRATION.read_text(encoding="utf-8"))
+        self.connection.executescript(IMAGE_REVIEW_MIGRATION.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.connection.close()
@@ -152,6 +154,51 @@ class InitialMigrationTests(unittest.TestCase):
             ("N" * 26,),
         ).fetchone()[0]
         self.assertEqual("C:/Smart Shooter/Output", folder)
+
+    def test_capture_sets_support_completion_and_images_support_independent_roles(self):
+        capture_set_columns = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(capture_sets)")
+        }
+        capture_image_columns = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(capture_images)")
+        }
+        self.assertIn("completed_at_utc", capture_set_columns)
+        self.assertIn("is_primary", capture_image_columns)
+        self.assertIn("is_banner", capture_image_columns)
+        indexes = self.connection.execute("PRAGMA index_list(capture_images)").fetchall()
+        self.assertIn("ix_capture_images_one_primary_per_set", {row[1] for row in indexes})
+
+        self.connection.execute("PRAGMA foreign_keys = OFF")
+        capture_set_id = "R" * 26
+        for index in range(2):
+            self.connection.execute(
+                "INSERT INTO capture_images(id, capture_set_id, image_asset_id, review_state, sequence_number, captured_at_utc, is_primary, is_banner) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (chr(ord("S") + index) * 26, capture_set_id, chr(ord("U") + index) * 26, 1, index, "2026-09-28T00:00:00Z", 1 if index == 0 else 0, 1),
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.connection.execute(
+                "INSERT INTO capture_images(id, capture_set_id, image_asset_id, review_state, sequence_number, captured_at_utc, is_primary, is_banner) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("W" * 26, capture_set_id, "X" * 26, 1, 2, "2026-09-28T00:00:00Z", 1, 0),
+            )
+
+    def test_review_migration_preserves_legacy_roles_and_normalizes_duplicate_primaries(self):
+        legacy = sqlite3.connect(":memory:")
+        legacy.executescript(MIGRATION.read_text(encoding="utf-8"))
+        legacy.executescript(ROSTER_ROWS_MIGRATION.read_text(encoding="utf-8"))
+        legacy.executescript(SMART_SHOOTER_MIGRATION.read_text(encoding="utf-8"))
+        legacy.execute("PRAGMA foreign_keys = OFF")
+        for index, review_state in enumerate((1, 1, 2, 3)):
+            legacy.execute(
+                "INSERT INTO capture_images(id, capture_set_id, image_asset_id, review_state, sequence_number, captured_at_utc) VALUES (?, ?, ?, ?, ?, ?)",
+                (chr(ord("A") + index) * 26, "Z" * 26, chr(ord("E") + index) * 26, review_state, index, "2026-09-28T00:00:00Z"),
+            )
+
+        legacy.executescript(IMAGE_REVIEW_MIGRATION.read_text(encoding="utf-8"))
+        migrated = legacy.execute(
+            "SELECT review_state, is_primary, is_banner FROM capture_images ORDER BY sequence_number"
+        ).fetchall()
+        self.assertEqual([(1, 1, 0), (1, 0, 0), (1, 0, 1), (2, 0, 0)], migrated)
+        legacy.close()
 
 
 if __name__ == "__main__":
