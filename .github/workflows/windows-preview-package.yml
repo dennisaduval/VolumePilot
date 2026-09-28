@@ -1,0 +1,82 @@
+name: Pilot Capture Windows Preview
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-preview-package.yml'
+      - 'apps/PilotCapture.Desktop/**'
+      - 'src/**'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+      - 'NuGet.config'
+      - 'VolumePilot.sln'
+      - 'global.json'
+
+permissions:
+  contents: read
+
+jobs:
+  publish-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish self-contained Windows build
+        id: package
+        shell: pwsh
+        run: |
+          $version = '0.1.0-preview'
+          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          $artifactName = "PilotCapture-$version-win-x64-$commit"
+          $publishDirectory = Join-Path $env:RUNNER_TEMP 'PilotCapture-publish'
+          $archivePath = Join-Path $env:RUNNER_TEMP "$artifactName.zip"
+          $checksumPath = "$archivePath.sha256"
+
+          dotnet publish apps/PilotCapture.Desktop/PilotCapture.Desktop.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output $publishDirectory `
+            "-p:Version=$version"
+
+          $executablePath = Join-Path $publishDirectory 'PilotCapture.Desktop.exe'
+          if (-not (Test-Path $executablePath)) {
+            throw "Publish output is missing PilotCapture.Desktop.exe."
+          }
+
+          $builtAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+          @"
+          VolumePilot Pilot Capture $version
+          Runtime: Windows x64
+          Commit: $env:GITHUB_SHA
+          Built: $builtAt
+
+          Extract this archive and run PilotCapture.Desktop.exe.
+          Local application data is stored under %LOCALAPPDATA%\VolumePilot\PilotCapture.
+          This is a preview build archive, not a signed installer.
+          "@ | Set-Content -Path (Join-Path $publishDirectory 'BUILD-INFO.txt') -Encoding utf8
+
+          Compress-Archive -Path (Join-Path $publishDirectory '*') `
+            -DestinationPath $archivePath -CompressionLevel Optimal
+          $checksum = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$checksum  $artifactName.zip" | Set-Content -Path $checksumPath -Encoding ascii
+
+          "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
+          "archive_path=$archivePath" >> $env:GITHUB_OUTPUT
+          "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
+
+      - name: Upload pilot preview archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: |
+            ${{ steps.package.outputs.archive_path }}
+            ${{ steps.package.outputs.checksum_path }}
+          if-no-files-found: error
+          retention-days: 14
