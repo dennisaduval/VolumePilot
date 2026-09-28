@@ -11,6 +11,106 @@ namespace PilotCapture.Infrastructure.Tests;
 public sealed class CaptureDataStoreTests
 {
     [Fact]
+    public async Task Smart_shooter_ingest_is_idempotent_and_leaves_the_source_file_untouched()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(cancellationToken);
+        var options = new DbContextOptionsBuilder<PilotCaptureDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new PilotCaptureDbContext(options);
+        await new DatabaseInitializer(dbContext).InitializeAsync(cancellationToken);
+
+        var captureSet = await CreateCaptureSetAsync(dbContext, cancellationToken);
+        captureSet.StartedAtUtc = DateTimeOffset.UtcNow.AddSeconds(-10);
+        var session = await dbContext.CaptureSessions.SingleAsync(cancellationToken);
+        var installation = await dbContext.LocalInstallations.SingleAsync(cancellationToken);
+
+        var root = Path.Combine(Path.GetTempPath(), $"pilot-capture-ingest-{Guid.NewGuid():N}");
+        var sourceDirectory = Path.Combine(root, "SmartShooter");
+        var mediaDirectory = Path.Combine(root, "ManagedMedia");
+        Directory.CreateDirectory(sourceDirectory);
+        var sourcePath = Path.Combine(sourceDirectory, "IMG_0001.JPG");
+        var sourceBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46 };
+        await File.WriteAllBytesAsync(sourcePath, sourceBytes, cancellationToken);
+        installation.SmartShooterOutputPath = sourceDirectory;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            var assetStore = new FileSystemImageAssetStore(mediaDirectory);
+            var ingest = new ImageIngestService(dbContext, assetStore, new CaptureDataStore(dbContext));
+
+            var first = await ingest.ImportJpegAsync(session.Id, captureSet.Id, sourcePath, cancellationToken);
+            var repeated = await ingest.ImportJpegAsync(session.Id, captureSet.Id, sourcePath, cancellationToken);
+
+            Assert.False(first.AlreadyImported);
+            Assert.True(repeated.AlreadyImported);
+            Assert.Equal(first.CaptureImageId, repeated.CaptureImageId);
+            Assert.Equal(sourceBytes, await File.ReadAllBytesAsync(sourcePath, cancellationToken));
+
+            var image = await dbContext.CaptureImages.Include(item => item.ImageAsset)
+                .SingleAsync(cancellationToken);
+            Assert.Equal(captureSet.Id, image.CaptureSetId);
+            Assert.Equal("IMG_0001.JPG", image.ImageAsset!.OriginalFileName);
+            Assert.True(assetStore.Exists(image.ImageAsset.RelativePath));
+            Assert.Equal(1, await dbContext.AuditEntries.CountAsync(cancellationToken));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Smart_shooter_ingest_skips_files_that_predate_the_selected_capture_set()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(cancellationToken);
+        var options = new DbContextOptionsBuilder<PilotCaptureDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new PilotCaptureDbContext(options);
+        await new DatabaseInitializer(dbContext).InitializeAsync(cancellationToken);
+
+        var captureSet = await CreateCaptureSetAsync(dbContext, cancellationToken);
+        captureSet.StartedAtUtc = DateTimeOffset.UtcNow;
+        var session = await dbContext.CaptureSessions.SingleAsync(cancellationToken);
+        var installation = await dbContext.LocalInstallations.SingleAsync(cancellationToken);
+        var root = Path.Combine(Path.GetTempPath(), $"pilot-capture-stale-{Guid.NewGuid():N}");
+        var sourceDirectory = Path.Combine(root, "SmartShooter");
+        Directory.CreateDirectory(sourceDirectory);
+        var sourcePath = Path.Combine(sourceDirectory, "IMG_0000.JPG");
+        await File.WriteAllBytesAsync(sourcePath, [0xFF, 0xD8, 0xFF, 0xE0], cancellationToken);
+        File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(-1));
+        installation.SmartShooterOutputPath = sourceDirectory;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            var ingest = new ImageIngestService(
+                dbContext,
+                new FileSystemImageAssetStore(Path.Combine(root, "ManagedMedia")),
+                new CaptureDataStore(dbContext));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                ingest.ImportJpegAsync(session.Id, captureSet.Id, sourcePath, cancellationToken));
+
+            Assert.True(File.Exists(sourcePath));
+            Assert.Empty(await dbContext.CaptureImages.ToListAsync(cancellationToken));
+            Assert.Empty(await dbContext.AuditEntries.ToListAsync(cancellationToken));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task First_image_becomes_primary_and_review_roles_remain_independent()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
