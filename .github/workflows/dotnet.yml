@@ -17,6 +17,8 @@ jobs:
         run: dotnet restore VolumePilot.sln
       - name: Build
         run: dotnet build VolumePilot.sln --configuration Release --no-restore
+      - name: Test application
+        run: dotnet test VolumePilot.sln --configuration Release --no-build
       - uses: actions/setup-python@v5
         with:
           python-version: 3.12
