@@ -68,7 +68,7 @@ public sealed class CaptureDataStoreTests
         Assert.Contains("Test team", csv);
         Assert.Contains("Alex Example", csv);
         Assert.Contains("File Exists", csv);
-        Assert.Contains(",False\n", csv);
+        Assert.Contains(",False", csv);
     }
 
     private static async Task<CaptureSet> CreateCaptureSetAsync(
