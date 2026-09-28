@@ -1,8 +1,40 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="PilotCapture.Desktop.App"
-             RequestedThemeVariant="Default">
+             RequestedThemeVariant="Light">
+  <Application.Resources>
+    <SolidColorBrush x:Key="VpNavyBrush" Color="#0B1F3A" />
+    <SolidColorBrush x:Key="VpRoyalBlueBrush" Color="#175CD3" />
+    <SolidColorBrush x:Key="VpFlightOrangeBrush" Color="#F97316" />
+    <SolidColorBrush x:Key="VpCloudBrush" Color="#F5F7FA" />
+    <SolidColorBrush x:Key="VpInstrumentBrush" Color="#111827" />
+  </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource VpInstrumentBrush}" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="MinHeight" Value="48" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.primary-action">
+      <Setter Property="Background" Value="{DynamicResource VpRoyalBlueBrush}" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.forward-action">
+      <Setter Property="Background" Value="{DynamicResource VpFlightOrangeBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource VpInstrumentBrush}" />
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="MinHeight" Value="48" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="MinHeight" Value="48" />
+    </Style>
+    <Style Selector="TabItem">
+      <Setter Property="MinHeight" Value="48" />
+    </Style>
   </Application.Styles>
 </Application>

@@ -7,6 +7,7 @@ Pilot Capture is the desktop, local-first capture application in VolumePilot. It
 ## Decisions carried forward
 
 - The application is a Windows desktop application for the initial release, built with C#/.NET 10 and Avalonia 12.
+- The UI follows the approved VolumePilot palette: Navy for framing, Cloud for work surfaces, Royal Blue for interactive states, and sparing Flight Orange for forward emphasis. Interactive controls have 48-pixel minimum height; state is communicated with text as well as color.
 - SQLite is the local database, accessed through Entity Framework Core.
 - IDs are ULIDs. Each installation has a persistent immutable installation ID; capture station codes are `s10`, `s20`, `s30`, and `s40`.
 - Roster data and photographer input identify subjects. QR codes and barcodes are not used to identify subjects.
