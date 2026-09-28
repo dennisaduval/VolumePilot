@@ -9,6 +9,7 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [x] Define the initial subject, membership, session, image, asset, and audit records.
 - [x] Add an initial versioned SQLite schema and first-run database initialization.
 - [x] Persist a local installation ID and initialize station `s10`.
+- [x] Apply the VolumePilot color system and establish 48-pixel minimum touch targets for the desktop controls.
 - [ ] Build and launch on Windows 11 Pro.
 - [ ] Confirm the agreed package versions restore and publish successfully.
 
@@ -35,6 +36,7 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 ## Release validation
 
 - [ ] Test a clean Windows 11 Pro installation.
+- [ ] Review the touch layout at common Windows display scaling settings on the supplied 2-in-1 laptops.
 - [ ] Validate portrait face crops and the no-detection fallback with pilot images on Windows 11 hardware.
 - [ ] Run an actual multi-team capture offline from setup through export.
 - [ ] Verify restart recovery and missing-file reporting.
