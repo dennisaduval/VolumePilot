@@ -67,7 +67,7 @@ Management of organizations, rosters, subjects, teams, groups, classifications, 
 Event creation, scheduling, locations, sessions, organizations, teams, stations, and operational event configuration.
 
 ### Pilot Capture
-Local-first photography capture workflow management, including subject identification, roster selection, QR and barcode workflows, image ingestion, image association, capture tracking, and configurable capture requirements.
+Local-first photography capture workflow management, including roster-driven subject selection, photographer input for unidentified subjects, JPEG ingestion and association, capture tracking, and configurable capture profiles. QR codes and barcodes are not used to identify subjects.
 
 Pilot Capture is intended to support multiple types of volume workflows, including single-team sessions, multi-team events, known and unknown subjects, single-image capture, multi-pose capture, and custom capture profiles.
 
@@ -120,7 +120,7 @@ A capture session may involve:
 - Variable numbers of photographs
 - One capture station or many simultaneous stations
 - Team, sport, division, class, school, or other group associations
-- QR codes, barcodes, roster selection, manual identification, or other identification methods
+- Roster selection for known subjects and photographer input to create unidentified subjects. QR codes and barcodes are not used to identify subjects.
 
 Capture behavior should therefore be configurable rather than hard-coded around a single photography business model.
 
@@ -167,11 +167,9 @@ Technology choices will be made based on the requirements of each component rath
 
 ## Project Status
 
-VolumePilot is currently in the architecture and requirements-definition phase.
+VolumePilot has begun foundational implementation. Pilot Capture is the first application moving toward its 0.1 First Flight milestone. Its selected baseline is C#/.NET 10, Avalonia 12, SQLite with EF Core, and ULID identifiers. The application is local-first and must continue operating offline.
 
-The project is a fresh architectural implementation informed by prior research, development, and real-world volume-photography workflow experience.
-
-Technical architecture, application boundaries, domain models, synchronization protocols, technology stacks, and implementation priorities will be documented before production development begins.
+The initial Pilot Capture solution structure, domain model, SQLite schema, and milestone documentation are being established in this repository. Capture UI workflows, CSV import, camera integration, Windows validation, and packaging remain in progress. See [Pilot Capture documentation](docs/pilot-capture/README.md) and the [First Flight checklist](docs/pilot-capture/first-flight-checklist.md).
 
 ---
 

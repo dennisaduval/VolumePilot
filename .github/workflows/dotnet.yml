@@ -1,0 +1,24 @@
+name: .NET
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore VolumePilot.sln
+      - name: Build
+        run: dotnet build VolumePilot.sln --configuration Release --no-restore
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Verify SQLite schema
+        run: python -m unittest discover -s tests -p 'test_*.py'
