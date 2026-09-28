@@ -13,6 +13,9 @@ public sealed class CaptureImageReviewRow(CaptureImageReviewItem item, Bitmap th
     public bool IsPrimary => item.IsPrimary;
     public bool IsBanner => item.IsBanner;
     public CaptureImageReviewState ReviewState => item.ReviewState;
+    public int? PixelWidth => item.PixelWidth;
+    public int? PixelHeight => item.PixelHeight;
+    public long ByteLength => item.ByteLength;
     public Bitmap Thumbnail { get; } = thumbnail;
     public string Caption
     {
@@ -23,7 +26,11 @@ public sealed class CaptureImageReviewRow(CaptureImageReviewItem item, Bitmap th
             if (IsBanner) flags.Add("Banner");
             if (ReviewState == CaptureImageReviewState.Rejected) flags.Add("Rejected");
             var details = flags.Count == 0 ? "Pending" : string.Join(" · ", flags);
-            return $"{SequenceNumber + 1}. {OriginalFileName}\n{details}";
+            var dimensions = PixelWidth is { } width && PixelHeight is { } height
+                ? $"{width:N0} × {height:N0} px"
+                : "dimensions unavailable";
+            var size = ByteLength / (1024d * 1024d);
+            return $"{SequenceNumber + 1}. {OriginalFileName}\n{dimensions} · {size:N1} MB\n{details}";
         }
     }
 }

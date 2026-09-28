@@ -48,6 +48,15 @@ public sealed class FileSystemImageAssetStore(string mediaRootPath) : IImageAsse
                     throw new InvalidDataException("The selected file does not contain a valid JPEG header.");
             }
 
+            int? pixelWidth;
+            int? pixelHeight;
+            await using (var content = new FileStream(temporaryPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true))
+            {
+                var dimensions = JpegMetadataReader.ReadPixelDimensions(content);
+                pixelWidth = dimensions?.Width;
+                pixelHeight = dimensions?.Height;
+            }
+
             string sha256;
             await using (var content = new FileStream(temporaryPath, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, useAsync: true))
                 sha256 = Convert.ToHexString(await SHA256.HashDataAsync(content, cancellationToken));
@@ -59,8 +68,8 @@ public sealed class FileSystemImageAssetStore(string mediaRootPath) : IImageAsse
                 Path.GetFileName(absoluteSourcePath),
                 byteLength,
                 sha256,
-                null,
-                null);
+                pixelWidth,
+                pixelHeight);
         }
         catch
         {

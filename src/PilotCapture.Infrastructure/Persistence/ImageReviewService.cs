@@ -20,7 +20,10 @@ public sealed class ImageReviewService(
                 image.SequenceNumber,
                 image.ReviewState,
                 image.IsPrimary,
-                image.IsBanner))
+                image.IsBanner,
+                image.ImageAsset!.PixelWidth,
+                image.ImageAsset!.PixelHeight,
+                image.ImageAsset!.ByteLength))
             .ToListAsync(cancellationToken);
 
     public Task ApplyActionAsync(

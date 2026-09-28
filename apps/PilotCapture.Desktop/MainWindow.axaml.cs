@@ -584,6 +584,10 @@ public sealed partial class MainWindow : Window
                 _selectedReviewBitmap = new Bitmap(imageStream);
 
             SelectedImageStatus.Text = $"{selected.OriginalFileName} · image {selected.SequenceNumber + 1}"
+                + (selected.PixelWidth is { } width && selected.PixelHeight is { } height
+                    ? $" · {width:N0} × {height:N0} px"
+                    : " · dimensions unavailable")
+                + $" · {selected.ByteLength / (1024d * 1024d):N1} MB"
                 + (selected.IsPrimary ? " · Primary" : string.Empty)
                 + (selected.IsBanner ? " · Banner" : string.Empty)
                 + (selected.ReviewState == CaptureImageReviewState.Rejected ? " · Rejected" : string.Empty);

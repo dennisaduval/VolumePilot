@@ -22,7 +22,10 @@ public sealed record CaptureImageReviewItem(
     int SequenceNumber,
     CaptureImageReviewState ReviewState,
     bool IsPrimary,
-    bool IsBanner);
+    bool IsBanner,
+    int? PixelWidth,
+    int? PixelHeight,
+    long ByteLength);
 
 public interface IImageReviewService
 {

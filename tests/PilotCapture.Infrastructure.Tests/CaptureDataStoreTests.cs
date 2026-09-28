@@ -32,7 +32,14 @@ public sealed class CaptureDataStoreTests
         var mediaDirectory = Path.Combine(root, "ManagedMedia");
         Directory.CreateDirectory(sourceDirectory);
         var sourcePath = Path.Combine(sourceDirectory, "IMG_0001.JPG");
-        var sourceBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46 };
+        var sourceBytes = new byte[]
+        {
+            0xFF, 0xD8,
+            0xFF, 0xE0, 0x00, 0x10,
+            0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+            0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x0E, 0x10, 0x0A, 0x28, 0x01, 0x01, 0x11, 0x00,
+            0xFF, 0xD9
+        };
         await File.WriteAllBytesAsync(sourcePath, sourceBytes, cancellationToken);
         installation.SmartShooterOutputPath = sourceDirectory;
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -54,8 +61,17 @@ public sealed class CaptureDataStoreTests
                 .SingleAsync(cancellationToken);
             Assert.Equal(captureSet.Id, image.CaptureSetId);
             Assert.Equal("IMG_0001.JPG", image.ImageAsset!.OriginalFileName);
+            Assert.Equal(2600, image.ImageAsset.PixelWidth);
+            Assert.Equal(3600, image.ImageAsset.PixelHeight);
             Assert.True(assetStore.Exists(image.ImageAsset.RelativePath));
             Assert.Equal(1, await dbContext.AuditEntries.CountAsync(cancellationToken));
+
+            var reviewItems = await new ImageReviewService(dbContext, new CaptureDataStore(dbContext))
+                .GetImagesAsync(captureSet.Id, cancellationToken);
+            var reviewItem = Assert.Single(reviewItems);
+            Assert.Equal(2600, reviewItem.PixelWidth);
+            Assert.Equal(3600, reviewItem.PixelHeight);
+            Assert.Equal((long)sourceBytes.Length, reviewItem.ByteLength);
         }
         finally
         {
