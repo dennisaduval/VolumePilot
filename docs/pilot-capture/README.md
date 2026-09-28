@@ -121,4 +121,4 @@ The image review tab retains thumbnails and shows a selected JPEG. Ingest reads 
 
 ## Build
 
-Requires the .NET 10 SDK. From the repository root, restore and build with `dotnet build VolumePilot.sln`. The SQLite schema checks run with `python -m unittest discover -s tests -p 'test_*.py'`. Windows build and runtime validation are tracked in the First Flight checklist.
+Requires the .NET 10 SDK. From the repository root, restore and build with `dotnet build VolumePilot.sln`. The SQLite schema checks run with `python -m unittest discover -s tests -p 'test_*.py'`. Windows build and runtime validation are tracked in the First Flight checklist. A repeatable [Windows preview package workflow](windows-preview-package.md) publishes a version-stamped, self-contained x64 ZIP and checksum for pilot testing; it is not the final installer.
