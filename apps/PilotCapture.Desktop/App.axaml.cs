@@ -6,7 +6,7 @@ using PilotCapture.Infrastructure.Persistence;
 
 namespace PilotCapture.Desktop;
 
-public sealed class App : Application
+public sealed partial class App : Avalonia.Application
 {
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
