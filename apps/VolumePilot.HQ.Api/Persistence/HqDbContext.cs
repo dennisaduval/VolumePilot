@@ -1,11 +1,23 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace VolumePilot.HQ.Api.Persistence;
 
 public sealed class HqDbContext(
     DbContextOptions<HqDbContext> options,
-    ITenantContext tenantContext) : DbContext(options)
+    ITenantContext tenantContext) : IdentityUserContext<HqUser>(options)
 {
+    private static readonly ValueConverter<DateTimeOffset, DateTime> DateTimeOffsetConverter = new(
+        value => value.UtcDateTime,
+        value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)));
+
+    private static readonly ValueConverter<DateTimeOffset?, DateTime?> NullableDateTimeOffsetConverter = new(
+        value => value.HasValue ? value.Value.UtcDateTime : null,
+        value => value.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(value.Value, DateTimeKind.Utc))
+            : null);
+
     public string? CurrentTenantId => tenantContext.TenantId;
 
     public DbSet<CompanyAccount> CompanyAccounts => Set<CompanyAccount>();
@@ -40,6 +52,10 @@ public sealed class HqDbContext(
                 .WithMany()
                 .HasForeignKey(x => x.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<HqUser>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
             entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
         });
 
@@ -105,6 +121,18 @@ public sealed class HqDbContext(
             entity.HasIndex(x => new { x.TenantId, x.JobId, x.StartsAtUtc });
             entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
         });
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(entity => entity.GetProperties()))
+        {
+            if (property.ClrType == typeof(DateTimeOffset))
+            {
+                property.SetValueConverter(DateTimeOffsetConverter);
+            }
+            else if (property.ClrType == typeof(DateTimeOffset?))
+            {
+                property.SetValueConverter(NullableDateTimeOffsetConverter);
+            }
+        }
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -146,7 +174,7 @@ public sealed class HqDbContext(
                 entry.Entity.TenantId = tenantId;
             }
 
-            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
+            if ((entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted) &&
                 entry.Entity.TenantId != tenantId)
             {
                 throw new InvalidOperationException("Tenant-owned data cannot be written outside the active tenant.");
@@ -155,7 +183,7 @@ public sealed class HqDbContext(
 
         foreach (var entry in ChangeTracker.Entries<CompanyAccount>())
         {
-            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
+            if ((entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted) &&
                 entry.Entity.Id != tenantId)
             {
                 throw new InvalidOperationException("Company data cannot be written outside the active tenant.");
