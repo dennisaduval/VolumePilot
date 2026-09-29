@@ -21,7 +21,8 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [x] Import multiple team/group associations and explicitly confirm any cross-group same-name subject link.
 - [ ] Verify the supplied sample roster imports with expected rows and memberships on Windows 11 Pro.
 - [x] Start a session with a photographer, workflow profile, and persistent station code.
-- [x] Select a rostered membership or create an unidentified subject; resume the active session and selected capture set after restart.
+- [x] Select a rostered membership, add a partially identified subject, or create an unidentified subject; resume the active session and selected capture set after restart.
+- [x] Export a new normalized event roster including active imported and photographer-entered subjects without altering the original roster file.
 - [x] Connect Smart Shooter 5's local JPEG output folder and ingest stable JPEG files into the selected capture set.
 - [x] Copy image files outside SQLite with generated asset-based paths and SHA-256 checksums while preserving source files.
 - [x] Store JPEG pixel dimensions when available and show dimensions plus file size in image review for camera-output monitoring.
