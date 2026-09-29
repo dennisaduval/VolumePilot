@@ -27,8 +27,6 @@ public sealed class RosterExportService(PilotCaptureDbContext dbContext) : IRost
             .Include(subject => subject.Event)
             .Include(subject => subject.Memberships)
                 .ThenInclude(membership => membership.Group)
-            .Include(subject => subject.Memberships)
-                .ThenInclude(membership => membership.SourceImport)
             .ToListAsync(cancellationToken);
 
         var records = new List<RosterExportRow>();
