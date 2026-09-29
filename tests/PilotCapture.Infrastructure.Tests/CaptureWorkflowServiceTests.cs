@@ -128,10 +128,11 @@ public sealed class CaptureWorkflowServiceTests
         Assert.Equal("Junior", membership.Role);
         Assert.Null(membership.RosterImportId);
         Assert.Equal("{\"source\":\"photographer-entry\"}", membership.SourceDataJson);
-        Assert.Equal(subject.Id, captureSet is not null
-            ? await dbContext.CaptureSets.Where(item => item.Id == captureSet.CaptureSetId)
-                .Select(item => item.SubjectId).SingleAsync(cancellationToken)
-            : null);
+        var capturedSubjectId = await dbContext.CaptureSets
+            .Where(item => item.Id == captureSet.CaptureSetId)
+            .Select(item => item.SubjectId)
+            .SingleAsync(cancellationToken);
+        Assert.Equal(subject.Id, capturedSubjectId);
         Assert.Equal(group.Id, captureSet.GroupId);
     }
 
