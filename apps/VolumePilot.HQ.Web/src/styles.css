@@ -582,6 +582,12 @@ input::placeholder {
 .work-table {
   grid-template-columns: 2fr 1.3fr 1fr;
 }
+.editable-table {
+  grid-template-columns: 2fr 1fr 1fr auto;
+}
+.work-table.editable-table {
+  grid-template-columns: 2fr 1.3fr 1fr auto;
+}
 .invitation-table {
   grid-template-columns: 2fr 0.7fr 0.8fr 1.4fr;
 }
@@ -633,8 +639,28 @@ input::placeholder {
 }
 .form-actions {
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
   margin-top: 20px;
+}
+.history-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 15px;
+}
+.history-entry {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.history-entry strong {
+  color: var(--navy);
+}
+.history-entry li {
+  margin-top: 6px;
 }
 .tabs {
   display: flex;
@@ -756,6 +782,7 @@ input::placeholder {
   }
   .table-row,
   .table-row.work-table,
+  .table-row.editable-table,
   .table-row.invitation-table {
     display: flex;
     flex-wrap: wrap;

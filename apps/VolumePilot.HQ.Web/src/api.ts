@@ -10,6 +10,8 @@ export type Organization = {
   name: string;
   organizationType: string | null;
   createdAtUtc: string;
+  updatedAtUtc: string | null;
+  revision: number;
 };
 export type Job = {
   id: string;
@@ -18,6 +20,8 @@ export type Job = {
   status: string;
   internalReference: string | null;
   createdAtUtc: string;
+  updatedAtUtc: string | null;
+  revision: number;
 };
 export type Event = {
   id: string;
@@ -27,6 +31,18 @@ export type Event = {
   endsAtUtc: string | null;
   timeZoneId: string | null;
   locationName: string | null;
+  updatedAtUtc: string | null;
+  revision: number;
+};
+export type Activity = {
+  id: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  actorEmail: string;
+  beforeJson: string;
+  afterJson: string;
+  occurredAtUtc: string;
 };
 export type Staff = {
   membershipId: string;
@@ -92,10 +108,18 @@ export async function get<T>(path: string): Promise<T> {
 }
 
 export async function post<T>(path: string, body: unknown): Promise<T> {
+  return mutate<T>(path, 'POST', body);
+}
+
+export async function put<T>(path: string, body: unknown): Promise<T> {
+  return mutate<T>(path, 'PUT', body);
+}
+
+async function mutate<T>(path: string, method: 'POST' | 'PUT', body: unknown): Promise<T> {
   const csrf = await get<{ requestToken: string }>("/api/auth/csrf");
   return parseResponse<T>(
     await fetch(path, {
-      method: "POST",
+      method,
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",

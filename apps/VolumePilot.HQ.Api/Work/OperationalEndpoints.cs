@@ -46,7 +46,9 @@ public static class OperationalEndpoints
                 organization.Id,
                 organization.Name,
                 organization.OrganizationType,
-                organization.CreatedAtUtc))
+                organization.CreatedAtUtc,
+                organization.UpdatedAtUtc,
+                organization.Revision))
             .ToListAsync(cancellationToken);
 
         return Results.Ok(result);
@@ -103,7 +105,9 @@ public static class OperationalEndpoints
             organization.Id,
             organization.Name,
             organization.OrganizationType,
-            organization.CreatedAtUtc));
+            organization.CreatedAtUtc,
+            organization.UpdatedAtUtc,
+            organization.Revision));
     }
 
     private static async Task<IResult> ListJobsAsync(
@@ -130,7 +134,9 @@ public static class OperationalEndpoints
                 job.Name,
                 job.Status,
                 job.InternalReference,
-                job.CreatedAtUtc))
+                job.CreatedAtUtc,
+                job.UpdatedAtUtc,
+                job.Revision))
             .ToListAsync(cancellationToken);
 
         return Results.Ok(result);
@@ -201,7 +207,9 @@ public static class OperationalEndpoints
             job.Name,
             job.Status,
             job.InternalReference,
-            job.CreatedAtUtc));
+            job.CreatedAtUtc,
+            job.UpdatedAtUtc,
+            job.Revision));
     }
 
     private static async Task<IResult> ListEventsAsync(
@@ -236,7 +244,9 @@ public static class OperationalEndpoints
                 item.StartsAtUtc,
                 item.EndsAtUtc,
                 item.TimeZoneId,
-                item.LocationName))
+                item.LocationName,
+                item.UpdatedAtUtc,
+                item.Revision))
             .ToListAsync(cancellationToken);
 
         return Results.Ok(result);
@@ -317,7 +327,9 @@ public static class OperationalEndpoints
             captureEvent.StartsAtUtc,
             captureEvent.EndsAtUtc,
             captureEvent.TimeZoneId,
-            captureEvent.LocationName));
+            captureEvent.LocationName,
+            captureEvent.UpdatedAtUtc,
+            captureEvent.Revision));
     }
 
     private static Task<bool> CanManageWorkAsync(
@@ -361,9 +373,11 @@ public static class OperationalEndpoints
     private static string NewId() => Ulid.NewUlid().ToString().ToLowerInvariant();
 
     public sealed record OrganizationRequest(string? Name, string? OrganizationType);
-    public sealed record OrganizationResponse(string Id, string Name, string? OrganizationType, DateTimeOffset CreatedAtUtc);
+    public sealed record OrganizationResponse(string Id, string Name, string? OrganizationType, DateTimeOffset CreatedAtUtc,
+        DateTimeOffset? UpdatedAtUtc, long Revision);
     public sealed record JobRequest(string ClientOrganizationId, string? Name, string? InternalReference);
-    public sealed record JobResponse(string Id, string ClientOrganizationId, string Name, string Status, string? InternalReference, DateTimeOffset CreatedAtUtc);
+    public sealed record JobResponse(string Id, string ClientOrganizationId, string Name, string Status, string? InternalReference,
+        DateTimeOffset CreatedAtUtc, DateTimeOffset? UpdatedAtUtc, long Revision);
     public sealed record EventRequest(
         string JobId,
         string? Name,
@@ -378,5 +392,7 @@ public static class OperationalEndpoints
         DateTimeOffset? StartsAtUtc,
         DateTimeOffset? EndsAtUtc,
         string? TimeZoneId,
-        string? LocationName);
+        string? LocationName,
+        DateTimeOffset? UpdatedAtUtc,
+        long Revision);
 }
