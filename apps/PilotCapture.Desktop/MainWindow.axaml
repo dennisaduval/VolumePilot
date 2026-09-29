@@ -165,7 +165,7 @@
                   <TextBox Grid.Row="1" Grid.Column="1" x:Name="ManualRole" PlaceholderText="Class / category (optional)" />
                 </Grid>
                 <Button Classes="primary-action" x:Name="CreateManualSubjectButton" Content="Add and select subject" IsEnabled="False" Padding="14,8" HorizontalAlignment="Left" Click="OnCreateManualSubjectClick" />
-                <TextBlock Text="Enter the details you know. Choose a group above to save its roster number or category." TextWrapping="Wrap" Opacity="0.75" />
+                <TextBlock Text="Enter at least one name; the other details are optional. If the name is unknown, use the unidentified option below. Select a group above to save a roster number or category." TextWrapping="Wrap" Opacity="0.75" />
                 <Border Height="1" Background="#DCE3ED" Margin="0,2" />
                 <TextBlock Text="Unidentified subject" FontWeight="SemiBold" />
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
