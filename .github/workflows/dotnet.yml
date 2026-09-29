@@ -29,7 +29,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet tool install dotnet-ef --tool-path .tools --version 10.0.12
-          .\.tools\dotnet-ef.exe migrations add InitialHqSchema --project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --startup-project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --context HqDbContext --output-dir Persistence/Migrations --no-build
+          .\.tools\dotnet-ef.exe migrations add InitialHqSchema --project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --startup-project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --context HqDbContext --output-dir Persistence/Migrations --configuration Release --no-build
       - uses: actions/upload-artifact@v4
         if: github.head_ref == 'hq/postgres-schema-migrations'
         with:
