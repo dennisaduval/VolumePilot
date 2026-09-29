@@ -12,6 +12,15 @@ builder.Services.AddProblemDetails();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<ITenantContext>(services => services.GetRequiredService<TenantContext>());
+if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddSingleton<DevelopmentInvitationDelivery>();
+    builder.Services.AddSingleton<IInvitationDelivery>(services => services.GetRequiredService<DevelopmentInvitationDelivery>());
+}
+else
+{
+    builder.Services.AddSingleton<IInvitationDelivery, UnavailableInvitationDelivery>();
+}
 
 var connectionString = builder.Configuration.GetConnectionString("HqDatabase");
 if (builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(connectionString))
@@ -132,10 +141,12 @@ app.MapGet("/api/health", () => TypedResults.Ok(new
     .WithName("GetApiHealth");
 
 app.MapHqAuthEndpoints();
+app.MapInvitationEndpoints();
 app.MapOperationalEndpoints();
 if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 {
     app.MapDevelopmentBootstrapEndpoints();
+    app.MapDevelopmentInvitationEndpoints();
 }
 
 app.Run();

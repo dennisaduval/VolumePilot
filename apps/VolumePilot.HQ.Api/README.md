@@ -20,7 +20,15 @@ The API listens on `http://localhost:5080` in the supplied launch profile. In De
 4. The bootstrap creates the first company owner and signs that owner in. The route is mapped only in Development and only succeeds before the first company is created.
 5. Fetch a fresh CSRF request token after sign-in. Tokens are bound to the current authenticated identity; fetch another after any later sign-in.
 
-Public registration is not mapped. Staff invitations and production email delivery will be added behind the accepted invitation-only account policy. Cookie-authenticated state changes require the anti-forgery header. Login attempts are rate-limited, and application data endpoints require an Owner or Admin membership in the active company.
+Public registration is not mapped. Cookie-authenticated state changes require the anti-forgery header. Login and invitation attempts are rate-limited. Organization, Job, and Event writes require an Owner or Admin membership in the active company.
+
+## Staff invitations
+
+An active company Owner or Admin can list staff with `GET /api/staff`, list invitations with `GET /api/staff/invitations`, create one with `POST /api/staff/invitations` (`email`, `role`: `Admin` or `Staff`), and revoke a pending invitation with `POST /api/staff/invitations/{id}/revoke`. A new invite for the same email revokes earlier pending invites. Invitations expire after seven days; only a hash of the random one-time token is stored in the database. `Staff` can read company data but cannot create work or invite staff.
+
+In Development and Testing, the Owner or Admin can read the local delivery from `GET /api/dev/invitations/{id}`. An invitee sends `POST /api/auth/accept-invitation` with `invitationId`, `token`, and a new password. If that email already has an HQ account, the invitee signs in with that account first and omits the password. Fetch a fresh CSRF token after acceptance, since it signs the invitee in and selects the invited company.
+
+Production invitation sending returns HTTP 503 until a real delivery provider is configured. The development inbox is not mapped in production. This is a deliberate gate before onboarding real users; account recovery and MFA are also pending.
 
 ## Initial data endpoints
 
@@ -45,4 +53,4 @@ dotnet ef migrations script --idempotent \
 
 Review and apply that script to the intended PostgreSQL database as a separate deployment step. Keep database credentials outside source control. To add a schema change, update the model and scaffold a PostgreSQL migration with `dotnet ef migrations add <Name> --output-dir Persistence/Migrations` using the same project, startup project, and context options. CI checks for model changes without a migration and applies migrations to an ephemeral PostgreSQL database.
 
-The production account invitation and email delivery flow is still pending, so the schema alone does not enable commercial onboarding.
+Production email delivery, account recovery, and MFA remain prerequisites for commercial onboarding.
