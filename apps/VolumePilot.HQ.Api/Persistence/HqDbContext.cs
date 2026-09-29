@@ -22,6 +22,7 @@ public sealed class HqDbContext(
 
     public DbSet<CompanyAccount> CompanyAccounts => Set<CompanyAccount>();
     public DbSet<CompanyMembership> CompanyMemberships => Set<CompanyMembership>();
+    public DbSet<StaffInvitation> StaffInvitations => Set<StaffInvitation>();
     public DbSet<ClientOrganization> ClientOrganizations => Set<ClientOrganization>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<Event> Events => Set<Event>();
@@ -56,6 +57,26 @@ public sealed class HqDbContext(
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
+        });
+
+        modelBuilder.Entity<StaffInvitation>(entity =>
+        {
+            entity.ToTable("staff_invitations");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(26);
+            entity.Property(x => x.TenantId).HasMaxLength(26).IsRequired();
+            entity.Property(x => x.Email).HasMaxLength(254).IsRequired();
+            entity.Property(x => x.NormalizedEmail).HasMaxLength(254).IsRequired();
+            entity.Property(x => x.Role).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.InvitedByUserId).HasMaxLength(450).IsRequired();
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.NormalizedEmail });
+            entity.HasOne<CompanyAccount>().WithMany().HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<HqUser>().WithMany().HasForeignKey(x => x.InvitedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
         });
 

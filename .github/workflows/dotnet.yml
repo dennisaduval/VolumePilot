@@ -54,6 +54,12 @@ jobs:
           dotnet build apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --configuration Release --no-restore
       - name: Install EF tool
         run: dotnet tool install dotnet-ef --tool-path .tools --version 10.0.12
+      - name: Scaffold staff invitation migration
+        run: ./.tools/dotnet-ef migrations add StaffInvitations --project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --startup-project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --context HqDbContext --configuration Release --no-build --output-dir Persistence/Migrations
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hq-staff-invitation-migration
+          path: apps/VolumePilot.HQ.Api/Persistence/Migrations/
       - name: Verify migration matches model
         run: ./.tools/dotnet-ef migrations has-pending-model-changes --project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --startup-project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --context HqDbContext --configuration Release --no-build
       - name: Generate PostgreSQL migration script

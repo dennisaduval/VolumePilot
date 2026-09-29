@@ -21,6 +21,21 @@ public sealed class CompanyMembership : ITenantOwned
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 
+public sealed class StaffInvitation : ITenantOwned
+{
+    public string Id { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string NormalizedEmail { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+    public string TokenHash { get; set; } = string.Empty;
+    public string InvitedByUserId { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? AcceptedAtUtc { get; set; }
+    public DateTimeOffset? RevokedAtUtc { get; set; }
+}
+
 public sealed class ClientOrganization : ITenantOwned
 {
     public string Id { get; set; } = string.Empty;
