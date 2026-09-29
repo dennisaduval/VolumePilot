@@ -17,10 +17,13 @@ public sealed class HealthEndpointTests : IClassFixture<WebApplicationFactory<Pr
     [Fact]
     public async Task ApiHealthReturnsServiceStatus()
     {
-        using var response = await _client.GetAsync("/api/health");
+        using var response = await _client.GetAsync(
+            "/api/health",
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = await response.Content.ReadFromJsonAsync<ApiHealthResponse>();
+        var result = await response.Content.ReadFromJsonAsync<ApiHealthResponse>(
+            TestContext.Current.CancellationToken);
         Assert.NotNull(result);
         Assert.Equal("VolumePilot HQ API", result.Service);
         Assert.Equal("ok", result.Status);
