@@ -204,6 +204,91 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         return new CaptureSetResult(captureSet.Id, subjectName, false, membership.GroupId, membership.Id, startedAt);
     }
 
+    public async Task<CaptureSetResult> CreateManualSubjectAsync(
+        string sessionId,
+        CaptureSubjectDetails details,
+        string? groupId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        var firstName = NormalizeOptional(details.FirstName, 100, nameof(details.FirstName));
+        var lastName = NormalizeOptional(details.LastName, 100, nameof(details.LastName));
+        var rosterNumber = NormalizeOptional(details.RosterNumber, 50, nameof(details.RosterNumber));
+        var role = NormalizeOptional(details.Role, 100, nameof(details.Role));
+        if (firstName is null && lastName is null)
+            throw new ArgumentException("Enter at least a first or last name, or use the unidentified subject option.", nameof(details));
+
+        var displayName = string.Join(" ", new[] { firstName, lastName }.Where(value => value is not null));
+        if (displayName.Length > 250)
+            throw new ArgumentException("Subject names can be at most 250 characters.", nameof(details));
+
+        var session = await dbContext.CaptureSessions.SingleOrDefaultAsync(
+            item => item.Id == sessionId && item.EndedAtUtc == null,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The active capture session was not found.");
+        Group? group = null;
+        if (!string.IsNullOrWhiteSpace(groupId))
+        {
+            group = await dbContext.Groups.SingleOrDefaultAsync(
+                item => item.Id == groupId && item.EventId == session.EventId && item.IsActive,
+                cancellationToken)
+                ?? throw new InvalidOperationException("The selected group is unavailable for this event.");
+        }
+        else if (rosterNumber is not null || role is not null)
+        {
+            throw new ArgumentException("Select a group to save a roster number or category.", nameof(groupId));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await CompleteCurrentCaptureSetAsync(session.Id, now, cancellationToken);
+        var subject = new Subject
+        {
+            EventId = session.EventId,
+            IdentityStatus = SubjectIdentityStatus.Known,
+            FirstName = firstName,
+            LastName = lastName,
+            DisplayName = displayName,
+            CreatedAtUtc = now
+        };
+        dbContext.Subjects.Add(subject);
+
+        Membership? membership = null;
+        if (group is not null)
+        {
+            membership = new Membership
+            {
+                SubjectId = subject.Id,
+                GroupId = group.Id,
+                RosterNumber = rosterNumber,
+                Role = role,
+                SourceDataJson = "{\"source\":\"photographer-entry\"}",
+                CreatedAtUtc = now
+            };
+            dbContext.Memberships.Add(membership);
+        }
+
+        var captureSet = new CaptureSet
+        {
+            CaptureSessionId = session.Id,
+            SubjectId = subject.Id,
+            MembershipId = membership?.Id,
+            StartedAtUtc = now
+        };
+        dbContext.CaptureSets.Add(captureSet);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new CaptureSetResult(captureSet.Id, subject.DisplayName, false, group?.Id, membership?.Id, now);
+    }
+
+    private static string? NormalizeOptional(string? value, int maxLength, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var normalized = value.Trim();
+        if (normalized.Length > maxLength)
+            throw new ArgumentException($"The value can be at most {maxLength} characters.", parameterName);
+        return normalized;
+    }
+
     public async Task<CaptureSetResult> CreateUnidentifiedSubjectAsync(
         string sessionId,
         string displayName,
