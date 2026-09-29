@@ -13,12 +13,12 @@ public sealed class HqApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
-        builder.UseSetting("ConnectionStrings:HqDatabase", $"Data Source={_databasePath}");
+        builder.UseSetting("ConnectionStrings:HqDatabase", $"Data Source={_databasePath};Pooling=False");
         builder.ConfigureAppConfiguration((_, configuration) =>
         {
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:HqDatabase"] = $"Data Source={_databasePath}",
+                ["ConnectionStrings:HqDatabase"] = $"Data Source={_databasePath};Pooling=False",
             });
         });
     }

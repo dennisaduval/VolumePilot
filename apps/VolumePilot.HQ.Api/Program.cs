@@ -64,7 +64,7 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.Name = ".VolumePilot.HQ.Session";
     options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")
         ? CookieSecurePolicy.SameAsRequest
         : CookieSecurePolicy.Always;
     options.ExpireTimeSpan = TimeSpan.FromHours(12);
@@ -87,7 +87,7 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.Name = ".VolumePilot.HQ.Antiforgery";
     options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.Strict;
-    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")
         ? CookieSecurePolicy.SameAsRequest
         : CookieSecurePolicy.Always;
 });
