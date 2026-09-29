@@ -28,6 +28,7 @@ public static class InfrastructureRegistration
                 .AddInterceptors(new SqliteConnectionPolicy()));
         services.AddScoped<DatabaseInitializer>();
         services.AddScoped<IRosterImportService, RosterImportService>();
+        services.AddScoped<IRosterExportService, RosterExportService>();
         services.AddScoped<ICaptureWorkflowService, CaptureWorkflowService>();
         services.AddSingleton<IImageAssetStore>(_ => new FileSystemImageAssetStore(mediaRootPath));
         services.AddScoped<ICaptureDataStore, CaptureDataStore>();

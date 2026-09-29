@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
     private readonly IImageReviewService _imageReviewService;
     private readonly IImageAssetStore _imageAssetStore;
     private readonly IImageAssociationExportService _imageAssociationExportService;
+    private readonly IRosterExportService _rosterExportService;
     private readonly WindowsPortraitFaceDetector _faceDetector;
     private readonly SemaphoreSlim _captureOperationLock = new(1, 1);
     private IReadOnlyList<CaptureImageReviewRow> _captureImageRows = [];
@@ -47,6 +48,7 @@ public sealed partial class MainWindow : Window
         IImageReviewService imageReviewService,
         IImageAssetStore imageAssetStore,
         IImageAssociationExportService imageAssociationExportService,
+        IRosterExportService rosterExportService,
         WindowsPortraitFaceDetector faceDetector)
     {
         _rosterImportService = rosterImportService;
@@ -55,11 +57,16 @@ public sealed partial class MainWindow : Window
         _imageReviewService = imageReviewService;
         _imageAssetStore = imageAssetStore;
         _imageAssociationExportService = imageAssociationExportService;
+        _rosterExportService = rosterExportService;
         _faceDetector = faceDetector;
         AvaloniaXamlLoader.Load(this);
         EventName.TextChanged += (_, _) => UpdateImportAvailability();
         PhotographerName.TextChanged += (_, _) => UpdateCaptureControls();
         UnidentifiedSubjectName.TextChanged += (_, _) => UpdateCaptureControls();
+        ManualFirstName.TextChanged += (_, _) => UpdateCaptureControls();
+        ManualLastName.TextChanged += (_, _) => UpdateCaptureControls();
+        ManualRosterNumber.TextChanged += (_, _) => UpdateCaptureControls();
+        ManualRole.TextChanged += (_, _) => UpdateCaptureControls();
         WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Portrait", Tag = CaptureWorkflowType.Portrait });
         WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Action", Tag = CaptureWorkflowType.Action });
         WorkflowTypeCombo.SelectedIndex = 0;
@@ -309,6 +316,35 @@ public sealed partial class MainWindow : Window
     {
         if (!_isPopulatingCaptureChoices)
             await RefreshCaptureGroupsAsync();
+    }
+
+    private async void OnExportRosterClick(object? sender, RoutedEventArgs e)
+    {
+        var captureEvent = SelectedChoice<CaptureEventChoice>(CaptureEventCombo);
+        if (captureEvent is null)
+            return;
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export a new VolumePilot roster",
+            SuggestedFileName = $"{MakeSafeFileName(captureEvent.Name)}-roster.csv",
+            DefaultExtension = "csv",
+            ShowOverwritePrompt = true,
+            FileTypeChoices = [new FilePickerFileType("CSV files") { Patterns = ["*.csv"] }]
+        });
+        if (file is null)
+            return;
+
+        try
+        {
+            await using var output = await file.OpenWriteAsync();
+            var exportedCount = await _rosterExportService.ExportEventAsync(captureEvent.Id, output);
+            SessionStatus.Text = $"Exported {exportedCount} subject/group row(s) to {file.Name}. The imported roster file remains unchanged.";
+        }
+        catch (Exception exception)
+        {
+            SessionStatus.Text = $"Roster export failed: {exception.Message}";
+        }
     }
 
     private async void OnExportImageAssociationsClick(object? sender, RoutedEventArgs e)
@@ -706,7 +742,7 @@ public sealed partial class MainWindow : Window
                 StopImageMonitoring();
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = null };
                 CaptureSubjectCombo.SelectedItem = null;
-                SelectedCaptureSubject.Text = "This subject is complete. Select another rostered subject or create an unidentified subject.";
+                SelectedCaptureSubject.Text = "This subject is complete. Select another rostered subject, add a subject, or create an unidentified subject.";
             }
             else
             {
@@ -850,6 +886,45 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void OnCreateManualSubjectClick(object? sender, RoutedEventArgs e)
+    {
+        var activeSession = _activeCaptureSession;
+        if (activeSession is null)
+            return;
+        await _captureOperationLock.WaitAsync();
+        try
+        {
+            var group = SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo);
+            var captureSet = await _captureWorkflowService.CreateManualSubjectAsync(
+                activeSession.Id,
+                new CaptureSubjectDetails(
+                    ManualFirstName.Text,
+                    ManualLastName.Text,
+                    ManualRosterNumber.Text,
+                    ManualRole.Text),
+                group?.Id);
+            _observedSourceVersions.Clear();
+            if (_activeCaptureSession?.Id == activeSession.Id)
+                _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
+            SelectedCaptureSubject.Text = $"Selected {captureSet.SubjectName}. Ready for this subject's images.";
+            ManualFirstName.Text = string.Empty;
+            ManualLastName.Text = string.Empty;
+            ManualRosterNumber.Text = string.Empty;
+            ManualRole.Text = string.Empty;
+            UpdateCaptureControls();
+            await RefreshCaptureGroupsAsync(captureSet.GroupId);
+            await RefreshReviewImagesAsync();
+        }
+        catch (Exception exception)
+        {
+            SelectedCaptureSubject.Text = $"Subject could not be added: {exception.Message}";
+        }
+        finally
+        {
+            _captureOperationLock.Release();
+        }
+    }
+
     private async void OnCreateUnidentifiedClick(object? sender, RoutedEventArgs e)
     {
         var activeSession = _activeCaptureSession;
@@ -888,6 +963,7 @@ public sealed partial class MainWindow : Window
             && SelectedChoice<CaptureEventChoice>(CaptureEventCombo) is not null
             && !string.IsNullOrWhiteSpace(PhotographerName.Text);
         ExportAssociationsButton.IsEnabled = SelectedChoice<CaptureEventChoice>(CaptureEventCombo) is not null;
+        ExportRosterButton.IsEnabled = SelectedChoice<CaptureEventChoice>(CaptureEventCombo) is not null;
         EndSessionButton.IsEnabled = active;
         CaptureEventCombo.IsEnabled = !active;
         PhotographerName.IsEnabled = !active;
@@ -898,6 +974,8 @@ public sealed partial class MainWindow : Window
                 && !string.IsNullOrWhiteSpace(SmartShooterFolderPath.Text));
         MonitorFolderButton.Content = _isMonitoringImageFolder ? "Stop monitoring" : "Start monitoring";
         SelectSubjectButton.IsEnabled = active && SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not null;
+        CreateManualSubjectButton.IsEnabled = active
+            && (!string.IsNullOrWhiteSpace(ManualFirstName.Text) || !string.IsNullOrWhiteSpace(ManualLastName.Text));
         CreateUnidentifiedButton.IsEnabled = active && !string.IsNullOrWhiteSpace(UnidentifiedSubjectName.Text);
         CaptureGroupCombo.IsEnabled = CaptureGroupCombo.Items.Count > 0;
         CaptureSubjectCombo.IsEnabled = CaptureSubjectCombo.Items.Count > 0;

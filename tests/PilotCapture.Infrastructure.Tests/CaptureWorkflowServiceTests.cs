@@ -89,4 +89,82 @@ public sealed class CaptureWorkflowServiceTests
             Assert.Equal("Morgan Miller", recovered.CurrentCaptureSet?.SubjectName);
         }
     }
+
+    [Fact]
+    public async Task Photographer_can_add_a_partially_identified_subject_and_capture_it()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(cancellationToken);
+        var options = new DbContextOptionsBuilder<PilotCaptureDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new PilotCaptureDbContext(options);
+        await new DatabaseInitializer(dbContext).InitializeAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var captureEvent = new PilotCapture.Domain.Event { Name = "Manual subject test", CreatedAtUtc = now };
+        var group = new Group { EventId = captureEvent.Id, Name = "Varsity", CreatedAtUtc = now };
+        dbContext.Events.Add(captureEvent);
+        dbContext.Groups.Add(group);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var workflow = new CaptureWorkflowService(dbContext);
+        var session = await workflow.StartSessionAsync(
+            captureEvent.Id, "Test Photographer", CaptureWorkflowType.Portrait, cancellationToken);
+        var captureSet = await workflow.CreateManualSubjectAsync(
+            session.Id,
+            new CaptureSubjectDetails("Riley", null, "42", "Junior"),
+            group.Id,
+            cancellationToken);
+
+        var subject = await dbContext.Subjects.SingleAsync(cancellationToken);
+        var membership = await dbContext.Memberships.SingleAsync(cancellationToken);
+        Assert.Equal(SubjectIdentityStatus.Known, subject.IdentityStatus);
+        Assert.Equal("Riley", subject.FirstName);
+        Assert.Null(subject.LastName);
+        Assert.Equal("Riley", subject.DisplayName);
+        Assert.Equal("42", membership.RosterNumber);
+        Assert.Equal("Junior", membership.Role);
+        Assert.Null(membership.RosterImportId);
+        Assert.Equal("{\"source\":\"photographer-entry\"}", membership.SourceDataJson);
+        var capturedSubjectId = await dbContext.CaptureSets
+            .Where(item => item.Id == captureSet.CaptureSetId)
+            .Select(item => item.SubjectId)
+            .SingleAsync(cancellationToken);
+        Assert.Equal(subject.Id, capturedSubjectId);
+        Assert.Equal(group.Id, captureSet.GroupId);
+    }
+
+    [Fact]
+    public async Task Manual_subject_requires_a_name_and_does_not_replace_the_unidentified_option()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(cancellationToken);
+        var options = new DbContextOptionsBuilder<PilotCaptureDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new PilotCaptureDbContext(options);
+        await new DatabaseInitializer(dbContext).InitializeAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var captureEvent = new PilotCapture.Domain.Event { Name = "Identity test", CreatedAtUtc = now };
+        dbContext.Events.Add(captureEvent);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        var workflow = new CaptureWorkflowService(dbContext);
+        var session = await workflow.StartSessionAsync(
+            captureEvent.Id, "Test Photographer", CaptureWorkflowType.Portrait, cancellationToken);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => workflow.CreateManualSubjectAsync(
+            session.Id, new CaptureSubjectDetails(null, null, null, null), null, cancellationToken));
+        var unknownCapture = await workflow.CreateUnidentifiedSubjectAsync(
+            session.Id, "Walk-in 1", null, cancellationToken);
+
+        var unknown = await dbContext.Subjects.SingleAsync(cancellationToken);
+        Assert.Equal(SubjectIdentityStatus.Unidentified, unknown.IdentityStatus);
+        Assert.True(unknownCapture.IsUnidentified);
+        Assert.Equal("Walk-in 1", unknown.DisplayName);
+        Assert.Empty(await dbContext.Memberships.ToListAsync(cancellationToken));
+    }
 }
