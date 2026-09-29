@@ -286,7 +286,7 @@ public static class AuthEndpoints
 
         return Results.Created("/api/auth/me", new UserSession(
             user.Id,
-            user.Email ?? email,
+            user.Email ?? email ?? string.Empty,
             companyId,
             [new CompanyOption(companyId, companyName)]));
     }
