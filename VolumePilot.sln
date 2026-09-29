@@ -14,6 +14,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PilotCapture.Application.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PilotCapture.Infrastructure.Tests", "tests\PilotCapture.Infrastructure.Tests\PilotCapture.Infrastructure.Tests.csproj", "{66666666-6666-4666-8666-666666666666}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VolumePilot.HQ.Api", "apps\VolumePilot.HQ.Api\VolumePilot.HQ.Api.csproj", "{77777777-7777-4777-8777-777777777777}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VolumePilot.HQ.Api.Tests", "tests\VolumePilot.HQ.Api.Tests\VolumePilot.HQ.Api.Tests.csproj", "{88888888-8888-4888-8888-888888888888}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -44,5 +48,13 @@ Global
 		{66666666-6666-4666-8666-666666666666}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{66666666-6666-4666-8666-666666666666}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{66666666-6666-4666-8666-666666666666}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77777777-7777-4777-8777-777777777777}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77777777-7777-4777-8777-777777777777}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77777777-7777-4777-8777-777777777777}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77777777-7777-4777-8777-777777777777}.Release|Any CPU.Build.0 = Release|Any CPU
+		{88888888-8888-4888-8888-888888888888}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{88888888-8888-4888-8888-888888888888}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{88888888-8888-4888-8888-888888888888}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{88888888-8888-4888-8888-888888888888}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
