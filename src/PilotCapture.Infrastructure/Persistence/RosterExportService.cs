@@ -60,7 +60,7 @@ public sealed class RosterExportService(PilotCaptureDbContext dbContext) : IRost
                     membership.Group!.Name,
                     membership.RosterNumber,
                     membership.Role,
-                    membership.SourceImportId is null ? "Photographer entered" : "Imported roster"));
+                    membership.RosterImportId is null ? "Photographer entered" : "Imported roster"));
             }
         }
 
