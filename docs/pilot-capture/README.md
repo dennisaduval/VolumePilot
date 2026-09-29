@@ -27,11 +27,11 @@ Pilot Capture is the desktop, local-first capture application in VolumePilot. It
 3. Import an organization roster from CSV and preserve source values without silently changing spelling.
 4. Support a multi-team capture workflow, including subject-to-team membership.
 5. Select a subject from the roster, enter the subject details the photographer knows, or create an unidentified subject; associate capture records with the selected subject and membership where applicable.
-10. Export a new normalized roster CSV that includes active imported and photographer-entered subjects without changing the original roster file.
 6. Ingest JPEGs from the capture workflow and associate image metadata to the active subject/session. Store image files outside SQLite and persist durable relative paths and metadata in SQLite.
 7. In portrait workflows, show face crop and thumbnails immediately. Support Primary, Banner, Reject, and Next actions.
 8. Resume after application restart without losing event, roster, session, subject, or image associations.
 9. Export image-to-subject associations for verification and downstream workflows.
+10. Export a new normalized roster CSV that includes active imported and photographer-entered subjects without changing the original roster file.
 
 ### Explicitly outside 0.1
 
