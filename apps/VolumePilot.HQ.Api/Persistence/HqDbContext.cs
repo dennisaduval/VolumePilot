@@ -1,10 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 
 namespace VolumePilot.HQ.Api.Persistence;
 
 public sealed class HqDbContext(
     DbContextOptions<HqDbContext> options,
-    ITenantContext tenantContext) : DbContext(options)
+    ITenantContext tenantContext) : IdentityUserContext<HqUser>(options)
 {
     public string? CurrentTenantId => tenantContext.TenantId;
 
@@ -40,6 +41,10 @@ public sealed class HqDbContext(
                 .WithMany()
                 .HasForeignKey(x => x.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<HqUser>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
             entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
         });
 
@@ -146,7 +151,7 @@ public sealed class HqDbContext(
                 entry.Entity.TenantId = tenantId;
             }
 
-            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
+            if ((entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted) &&
                 entry.Entity.TenantId != tenantId)
             {
                 throw new InvalidOperationException("Tenant-owned data cannot be written outside the active tenant.");
@@ -155,7 +160,7 @@ public sealed class HqDbContext(
 
         foreach (var entry in ChangeTracker.Entries<CompanyAccount>())
         {
-            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
+            if ((entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted) &&
                 entry.Entity.Id != tenantId)
             {
                 throw new InvalidOperationException("Company data cannot be written outside the active tenant.");
