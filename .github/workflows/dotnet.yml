@@ -24,3 +24,39 @@ jobs:
           python-version: 3.12
       - name: Verify SQLite schema
         run: python -m unittest discover -s tests -p 'test_*.py'
+
+  hq-postgres-migration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: volumepilot_hq_test
+          POSTGRES_USER: vp_test
+          POSTGRES_PASSWORD: vp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vp_test -d volumepilot_hq_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      HQ_TEST_DB_CONNECTION: Host=localhost;Port=5432;Database=volumepilot_hq_test;Username=vp_test;Password=vp_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore and build HQ API
+        run: |
+          dotnet restore apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj
+          dotnet build apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --configuration Release --no-restore
+      - name: Install EF tool
+        run: dotnet tool install dotnet-ef --tool-path .tools --version 10.0.12
+      - name: Verify migration matches model
+        run: ./.tools/dotnet-ef migrations has-pending-model-changes --project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --startup-project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --context HqDbContext --configuration Release --no-build
+      - name: Generate PostgreSQL migration script
+        run: ./.tools/dotnet-ef migrations script --idempotent --project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --startup-project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --context HqDbContext --configuration Release --no-build --output "$RUNNER_TEMP/hq-postgres.sql"
+      - name: Apply migration to PostgreSQL
+        run: ./.tools/dotnet-ef database update --connection "$HQ_TEST_DB_CONNECTION" --project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --startup-project apps/VolumePilot.HQ.Api/VolumePilot.HQ.Api.csproj --context HqDbContext --configuration Release --no-build
