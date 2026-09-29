@@ -19,6 +19,11 @@ if (builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(connectionS
     connectionString = $"Data Source={Path.Combine(builder.Environment.ContentRootPath, "volumepilot-hq.dev.db")}";
 }
 
+if (builder.Environment.IsEnvironment("Testing") && string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Testing requires an isolated HqDatabase connection string.");
+}
+
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     throw new InvalidOperationException("Configure the HqDatabase connection string before starting HQ outside Development.");
@@ -109,7 +114,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 {
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<HqDbContext>();
