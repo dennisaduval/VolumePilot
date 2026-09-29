@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace VolumePilot.HQ.Api.Persistence;
 
@@ -7,6 +8,16 @@ public sealed class HqDbContext(
     DbContextOptions<HqDbContext> options,
     ITenantContext tenantContext) : IdentityUserContext<HqUser>(options)
 {
+    private static readonly ValueConverter<DateTimeOffset, DateTime> DateTimeOffsetConverter = new(
+        value => value.UtcDateTime,
+        value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)));
+
+    private static readonly ValueConverter<DateTimeOffset?, DateTime?> NullableDateTimeOffsetConverter = new(
+        value => value.HasValue ? value.Value.UtcDateTime : null,
+        value => value.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(value.Value, DateTimeKind.Utc))
+            : null);
+
     public string? CurrentTenantId => tenantContext.TenantId;
 
     public DbSet<CompanyAccount> CompanyAccounts => Set<CompanyAccount>();
@@ -110,6 +121,18 @@ public sealed class HqDbContext(
             entity.HasIndex(x => new { x.TenantId, x.JobId, x.StartsAtUtc });
             entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
         });
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(entity => entity.GetProperties()))
+        {
+            if (property.ClrType == typeof(DateTimeOffset))
+            {
+                property.SetValueConverter(DateTimeOffsetConverter);
+            }
+            else if (property.ClrType == typeof(DateTimeOffset?))
+            {
+                property.SetValueConverter(NullableDateTimeOffsetConverter);
+            }
+        }
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
