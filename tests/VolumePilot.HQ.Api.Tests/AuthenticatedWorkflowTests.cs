@@ -46,6 +46,9 @@ public sealed class AuthenticatedWorkflowTests
         using var bootstrapResponse = await client.SendAsync(bootstrapRequest, cancellationToken);
         Assert.Equal(HttpStatusCode.Created, bootstrapResponse.StatusCode);
 
+        // Antiforgery tokens are bound to the current identity, so fetch one again after sign-in.
+        csrf = await GetCsrfTokenAsync(client, cancellationToken);
+
         using var sessionResponse = await client.GetAsync("/api/auth/me", cancellationToken);
         Assert.Equal(HttpStatusCode.OK, sessionResponse.StatusCode);
         var session = await sessionResponse.Content.ReadFromJsonAsync<UserSession>(cancellationToken);

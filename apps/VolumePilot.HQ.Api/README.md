@@ -18,6 +18,7 @@ The API listens on `http://localhost:5080` in the supplied launch profile. In De
 2. Check `GET /api/dev/bootstrap-status`.
 3. If the response says bootstrap is required, send `POST /api/dev/bootstrap` with `X-CSRF-TOKEN`, a company name, email address, and a password of at least 12 characters that includes a digit, lowercase letter, uppercase letter, and symbol.
 4. The bootstrap creates the first company owner and signs that owner in. The route is mapped only in Development and only succeeds before the first company is created.
+5. Fetch a fresh CSRF request token after sign-in. Tokens are bound to the current authenticated identity; fetch another after any later sign-in.
 
 Public registration is not mapped. Staff invitations and production email delivery will be added behind the accepted invitation-only account policy. Cookie-authenticated state changes require the anti-forgery header. Login attempts are rate-limited, and application data endpoints require an Owner or Admin membership in the active company.
 
