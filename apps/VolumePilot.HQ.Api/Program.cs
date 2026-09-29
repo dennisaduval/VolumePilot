@@ -143,6 +143,7 @@ app.MapGet("/api/health", () => TypedResults.Ok(new
 app.MapHqAuthEndpoints();
 app.MapInvitationEndpoints();
 app.MapOperationalEndpoints();
+app.MapCorrectionEndpoints();
 if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 {
     app.MapDevelopmentBootstrapEndpoints();

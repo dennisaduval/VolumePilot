@@ -26,6 +26,7 @@ public sealed class HqDbContext(
     public DbSet<ClientOrganization> ClientOrganizations => Set<ClientOrganization>();
     public DbSet<Job> Jobs => Set<Job>();
     public DbSet<Event> Events => Set<Event>();
+    public DbSet<ActivityRecord> ActivityRecords => Set<ActivityRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -88,6 +89,7 @@ public sealed class HqDbContext(
             entity.Property(x => x.TenantId).HasMaxLength(26).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.OrganizationType).HasMaxLength(80);
+            entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasOne<CompanyAccount>()
                 .WithMany()
@@ -106,6 +108,7 @@ public sealed class HqDbContext(
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
             entity.Property(x => x.InternalReference).HasMaxLength(100);
+            entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasOne<CompanyAccount>()
                 .WithMany()
@@ -130,6 +133,7 @@ public sealed class HqDbContext(
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.TimeZoneId).HasMaxLength(100);
             entity.Property(x => x.LocationName).HasMaxLength(200);
+            entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
             entity.HasOne<CompanyAccount>()
                 .WithMany()
                 .HasForeignKey(x => x.TenantId)
@@ -140,6 +144,26 @@ public sealed class HqDbContext(
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => new { x.TenantId, x.JobId, x.StartsAtUtc });
+            entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
+        });
+
+        modelBuilder.Entity<ActivityRecord>(entity =>
+        {
+            entity.ToTable("activity_records");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasMaxLength(26);
+            entity.Property(x => x.TenantId).HasMaxLength(26).IsRequired();
+            entity.Property(x => x.ActorUserId).HasMaxLength(450).IsRequired();
+            entity.Property(x => x.EntityType).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.EntityId).HasMaxLength(26).IsRequired();
+            entity.Property(x => x.Action).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.BeforeJson).IsRequired();
+            entity.Property(x => x.AfterJson).IsRequired();
+            entity.HasOne<CompanyAccount>().WithMany().HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<HqUser>().WithMany().HasForeignKey(x => x.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => new { x.TenantId, x.EntityType, x.EntityId, x.OccurredAtUtc });
             entity.HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId);
         });
 

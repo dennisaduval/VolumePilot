@@ -104,6 +104,41 @@ public sealed class TenantPersistenceTests
         Assert.NotNull(error);
     }
 
+    [Fact]
+    public async Task StaleTrackedEditCannotOverwriteTheWinnerOrCommitItsActivity()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = await OpenDatabaseAsync(ct);
+        var tenantId = NewId();
+        var organizationId = NewId();
+        var userId = NewId();
+        await using (var seed = CreateContext(connection, tenantId))
+        {
+            seed.CompanyAccounts.Add(new CompanyAccount { Id = tenantId, Name = "Studio" });
+            seed.Users.Add(new HqUser { Id = userId });
+            seed.ClientOrganizations.Add(new ClientOrganization { Id = organizationId, Name = "Original" });
+            await seed.SaveChangesAsync(ct);
+        }
+        await using var winner = CreateContext(connection, tenantId);
+        await using var stale = CreateContext(connection, tenantId);
+        var first = await winner.ClientOrganizations.SingleAsync(ct);
+        var second = await stale.ClientOrganizations.SingleAsync(ct);
+        first.Name = "Winner";
+        first.Revision++;
+        await winner.SaveChangesAsync(ct);
+        second.Name = "Loser";
+        second.Revision++;
+        stale.ActivityRecords.Add(new ActivityRecord
+        {
+            Id = NewId(), ActorUserId = userId, EntityType = "Organization", EntityId = organizationId,
+            Action = "Updated", BeforeJson = "{}", AfterJson = "{}", OccurredAtUtc = DateTimeOffset.UtcNow,
+        });
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => stale.SaveChangesAsync(ct));
+        await using var verify = CreateContext(connection, tenantId);
+        Assert.Equal("Winner", (await verify.ClientOrganizations.SingleAsync(ct)).Name);
+        Assert.Empty(await verify.ActivityRecords.ToListAsync(ct));
+    }
+
     private static async Task<SqliteConnection> OpenDatabaseAsync(CancellationToken cancellationToken)
     {
         var connection = new SqliteConnection("Data Source=:memory:");

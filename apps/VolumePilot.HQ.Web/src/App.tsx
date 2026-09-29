@@ -5,6 +5,7 @@ import {
   ApiError,
   get,
   post,
+  put,
   type Company,
   type Event,
   type Invitation,
@@ -148,10 +149,12 @@ export function App() {
     setBusy(true);
     try {
       await task();
+      return true;
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Something went wrong.",
       );
+      return false;
     } finally {
       setBusy(false);
     }
@@ -242,6 +245,19 @@ export function App() {
     await submit(async () => {
       const item = await post<T>(path, body);
       onSuccess(item);
+      setNotice(message);
+      await loadData();
+    });
+  }
+
+  async function update(path: string, body: unknown, message: string) {
+    return submit(async () => {
+      try {
+        await put(path, body);
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 409) await loadData();
+        throw cause;
+      }
       setNotice(message);
       await loadData();
     });
@@ -593,6 +609,8 @@ export function App() {
             <OrganizationsPage
               items={organizations}
               busy={busy}
+              allowed={staffAllowed}
+              update={(item, body) => update(`/api/organizations/${item.id}`, body, "Organization updated.")}
               create={(body, done) =>
                 void create<Organization>(
                   "/api/organizations",
@@ -609,6 +627,9 @@ export function App() {
               jobs={jobs}
               events={events}
               busy={busy}
+              allowed={staffAllowed}
+              updateJob={(item, body) => update(`/api/jobs/${item.id}`, body, "Job updated.")}
+              updateEvent={(item, body) => update(`/api/events/${item.id}`, body, "Event updated.")}
               createJob={(body, done) =>
                 void create<Job>("/api/jobs", body, done, "Job created.")
               }

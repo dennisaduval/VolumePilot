@@ -1,21 +1,45 @@
 import { useState, type FormEvent } from "react";
 import type { Event, Invitation, Job, Organization, Staff } from "./api";
 import { Banner, Empty, PageTitle, dateLabel } from "./ui";
+import { PlanningHistory } from "./PlanningHistory";
+
+function localDateTime(value: string): string {
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 23);
+}
 
 export function OrganizationsPage({
   items,
   busy,
+  allowed,
   create,
+  update,
 }: {
   items: Organization[];
   busy: boolean;
+  allowed: boolean;
   create: (body: unknown, done: (item: Organization) => void) => void;
+  update: (item: Organization, body: unknown) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState("");
-  function save(event: FormEvent) {
+  const [editing, setEditing] = useState<Organization | null>(null);
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const historyItem = items.find((item) => item.id === historyId);
+  function toggleForm() {
+    setEditing(null);
+    setName("");
+    setType("");
+    setOpen(!open);
+  }
+  async function save(event: FormEvent) {
     event.preventDefault();
+    if (editing) {
+      if (await update(editing, { name, organizationType: type || null, revision: editing.revision })) setEditing(null);
+      return;
+    }
     create({ name, organizationType: type || null }, () => {
       setOpen(false);
       setName("");
@@ -29,14 +53,14 @@ export function OrganizationsPage({
         title="Organizations"
         description="Schools, leagues, clubs, and other clients you work with."
         action={
-          <button className="primary-button" onClick={() => setOpen(!open)}>
+          allowed && <button className="primary-button" disabled={busy} onClick={toggleForm}>
             {open ? "Close form" : "Add organization"}
           </button>
         }
       />
-      {open && (
+      {(open || editing) && (
         <form className="surface form-panel" onSubmit={save}>
-          <h2>New organization</h2>
+          <h2>{editing ? "Edit organization" : "New organization"}</h2>
           <div className="form-grid">
             <label>
               Name
@@ -60,22 +84,29 @@ export function OrganizationsPage({
           </div>
           <div className="form-actions">
             <button className="primary-button" disabled={busy}>
-              Save organization
+              {editing ? "Save changes" : "Save organization"}
             </button>
+            {editing && <button type="button" className="secondary-button" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>}
           </div>
         </form>
       )}
+      {historyItem && <PlanningHistory entityType="Organization" item={historyItem} onClose={() => setHistoryId(null)} />}
       <div className="surface list-surface">
-        <div className="table-head">
+        <div className="table-head editable-table">
           <strong>Name</strong>
           <strong>Type</strong>
           <strong>Added</strong>
+          <strong>Action</strong>
         </div>
         {items.map((item) => (
-          <div className="table-row" key={item.id}>
+          <div className="table-row editable-table" key={item.id}>
             <strong>{item.name}</strong>
             <span>{item.organizationType || "—"}</span>
             <span>{new Date(item.createdAtUtc).toLocaleDateString()}</span>
+            <div className="row-actions">
+              {allowed && <button className="text-button" disabled={busy} onClick={() => { setOpen(false); setEditing(item); setName(item.name); setType(item.organizationType ?? ""); }}>Edit</button>}
+              <button className="text-button" onClick={() => setHistoryId(item.id)}>History</button>
+            </div>
           </div>
         ))}
         {items.length === 0 && (
@@ -93,15 +124,21 @@ export function WorkPage({
   jobs,
   events,
   busy,
+  allowed,
   createJob,
   createEvent,
+  updateJob,
+  updateEvent,
 }: {
   organizations: Organization[];
   jobs: Job[];
   events: Event[];
   busy: boolean;
+  allowed: boolean;
   createJob: (body: unknown, done: (item: Job) => void) => void;
   createEvent: (body: unknown, done: (item: Event) => void) => void;
+  updateJob: (item: Job, body: unknown) => Promise<boolean>;
+  updateEvent: (item: Event, body: unknown) => Promise<boolean>;
 }) {
   const [tab, setTab] = useState<"jobs" | "events">("jobs");
   const [open, setOpen] = useState(false);
@@ -116,8 +153,29 @@ export function WorkPage({
     Intl.DateTimeFormat().resolvedOptions().timeZone,
   );
   const [location, setLocation] = useState("");
-  function saveJob(event: FormEvent) {
+  const [editingJob, setEditingJob] = useState<Job | null>(null);
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
+  const [history, setHistory] = useState<{ entityType: "Job" | "Event"; id: string } | null>(null);
+  const historyItem = history?.entityType === "Job" ? jobs.find((item) => item.id === history.id) : events.find((item) => item.id === history?.id);
+  function resetForm() {
+    setEditingJob(null);
+    setEditingEvent(null);
+    setOrgId("");
+    setJobName("");
+    setReference("");
+    setJobId("");
+    setEventName("");
+    setStart("");
+    setEnd("");
+    setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    setLocation("");
+  }
+  async function saveJob(event: FormEvent) {
     event.preventDefault();
+    if (editingJob) {
+      if (await updateJob(editingJob, { name: jobName, internalReference: reference || null, revision: editingJob.revision })) setEditingJob(null);
+      return;
+    }
     createJob(
       {
         clientOrganizationId: orgId,
@@ -131,8 +189,12 @@ export function WorkPage({
       },
     );
   }
-  function saveEvent(event: FormEvent) {
+  async function saveEvent(event: FormEvent) {
     event.preventDefault();
+    if (editingEvent) {
+      if (await updateEvent(editingEvent, { name: eventName, startsAtUtc: start ? new Date(start).toISOString() : null, endsAtUtc: end ? new Date(end).toISOString() : null, timeZoneId: zone || null, locationName: location || null, revision: editingEvent.revision })) setEditingEvent(null);
+      return;
+    }
     createEvent(
       {
         jobId,
@@ -158,10 +220,10 @@ export function WorkPage({
         title="Jobs & Events"
         description="A Job organizes client work. An Event is a scheduled capture occasion within it."
         action={
-          <button
+          allowed && <button
             className="primary-button"
-            onClick={() => setOpen(!open)}
-            disabled={tab === "jobs" ? !organizations.length : !jobs.length}
+            onClick={() => { resetForm(); setOpen(!open); }}
+            disabled={busy || (tab === "jobs" ? !organizations.length : !jobs.length)}
           >
             {open ? "Close form" : tab === "jobs" ? "Create Job" : "Add Event"}
           </button>
@@ -171,10 +233,12 @@ export function WorkPage({
         <button
           role="tab"
           aria-selected={tab === "jobs"}
+          disabled={busy}
           className={tab === "jobs" ? "is-active" : ""}
           onClick={() => {
             setTab("jobs");
             setOpen(false);
+            resetForm();
           }}
         >
           Jobs <span>{jobs.length}</span>
@@ -182,23 +246,26 @@ export function WorkPage({
         <button
           role="tab"
           aria-selected={tab === "events"}
+          disabled={busy}
           className={tab === "events" ? "is-active" : ""}
           onClick={() => {
             setTab("events");
             setOpen(false);
+            resetForm();
           }}
         >
           Events <span>{events.length}</span>
         </button>
       </div>
-      {open && tab === "jobs" && (
+      {(open || editingJob) && tab === "jobs" && (
         <form className="surface form-panel" onSubmit={saveJob}>
-          <h2>New Job</h2>
+          <h2>{editingJob ? "Edit Job" : "New Job"}</h2>
           <div className="form-grid">
             <label>
               Organization
               <select
                 required
+                disabled={Boolean(editingJob)}
                 value={orgId}
                 onChange={(event) => setOrgId(event.target.value)}
               >
@@ -231,19 +298,21 @@ export function WorkPage({
           </div>
           <div className="form-actions">
             <button className="primary-button" disabled={busy}>
-              Create Job
+              {editingJob ? "Save changes" : "Create Job"}
             </button>
+            {editingJob && <button type="button" className="secondary-button" disabled={busy} onClick={() => setEditingJob(null)}>Cancel</button>}
           </div>
         </form>
       )}
-      {open && tab === "events" && (
+      {(open || editingEvent) && tab === "events" && (
         <form className="surface form-panel" onSubmit={saveEvent}>
-          <h2>New Event</h2>
+          <h2>{editingEvent ? "Edit Event" : "New Event"}</h2>
           <div className="form-grid">
             <label>
               Job
               <select
                 required
+                disabled={Boolean(editingEvent)}
                 value={jobId}
                 onChange={(event) => setJobId(event.target.value)}
               >
@@ -269,6 +338,7 @@ export function WorkPage({
               Starts <span className="optional">Optional</span>
               <input
                 type="datetime-local"
+                step="any"
                 value={start}
                 onChange={(event) => setStart(event.target.value)}
               />
@@ -277,6 +347,7 @@ export function WorkPage({
               Ends <span className="optional">Optional</span>
               <input
                 type="datetime-local"
+                step="any"
                 min={start || undefined}
                 value={end}
                 onChange={(event) => setEnd(event.target.value)}
@@ -305,21 +376,24 @@ export function WorkPage({
           </p>
           <div className="form-actions">
             <button className="primary-button" disabled={busy}>
-              Add Event
+              {editingEvent ? "Save changes" : "Add Event"}
             </button>
+            {editingEvent && <button type="button" className="secondary-button" disabled={busy} onClick={() => setEditingEvent(null)}>Cancel</button>}
           </div>
         </form>
       )}
+      {history && historyItem && <PlanningHistory entityType={history.entityType} item={historyItem} onClose={() => setHistory(null)} />}
       <div className="surface list-surface">
         {tab === "jobs" ? (
           <>
-            <div className="table-head work-table">
+            <div className="table-head work-table editable-table">
               <strong>Job</strong>
               <strong>Organization</strong>
               <strong>Status</strong>
+              <strong>Action</strong>
             </div>
             {jobs.map((item) => (
-              <div className="table-row work-table" key={item.id}>
+              <div className="table-row work-table editable-table" key={item.id}>
                 <div>
                   <strong>{item.name}</strong>
                   {item.internalReference && (
@@ -332,6 +406,10 @@ export function WorkPage({
                   )?.name ?? "Organization"}
                 </span>
                 <span className="pill">{item.status}</span>
+                <div className="row-actions">
+                  {allowed && <button className="text-button" disabled={busy} onClick={() => { setOpen(false); setEditingEvent(null); setEditingJob(item); setOrgId(item.clientOrganizationId); setJobName(item.name); setReference(item.internalReference ?? ""); }}>Edit</button>}
+                  <button className="text-button" onClick={() => setHistory({ entityType: "Job", id: item.id })}>History</button>
+                </div>
               </div>
             ))}
             {jobs.length === 0 && (
@@ -344,13 +422,14 @@ export function WorkPage({
           </>
         ) : (
           <>
-            <div className="table-head work-table">
+            <div className="table-head work-table editable-table">
               <strong>Event</strong>
               <strong>Job</strong>
               <strong>Start</strong>
+              <strong>Action</strong>
             </div>
             {events.map((item) => (
-              <div className="table-row work-table" key={item.id}>
+              <div className="table-row work-table editable-table" key={item.id}>
                 <div>
                   <strong>{item.name}</strong>
                   {item.locationName && <small>{item.locationName}</small>}
@@ -359,6 +438,10 @@ export function WorkPage({
                   {jobs.find((job) => job.id === item.jobId)?.name ?? "Job"}
                 </span>
                 <span>{dateLabel(item.startsAtUtc)}</span>
+                <div className="row-actions">
+                  {allowed && <button className="text-button" disabled={busy} onClick={() => { setOpen(false); setEditingJob(null); setEditingEvent(item); setJobId(item.jobId); setEventName(item.name); setStart(item.startsAtUtc ? localDateTime(item.startsAtUtc) : ""); setEnd(item.endsAtUtc ? localDateTime(item.endsAtUtc) : ""); setZone(item.timeZoneId ?? ""); setLocation(item.locationName ?? ""); }}>Edit</button>}
+                  <button className="text-button" onClick={() => setHistory({ entityType: "Event", id: item.id })}>History</button>
+                </div>
               </div>
             ))}
             {events.length === 0 && (

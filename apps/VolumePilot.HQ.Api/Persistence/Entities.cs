@@ -43,6 +43,8 @@ public sealed class ClientOrganization : ITenantOwned
     public string Name { get; set; } = string.Empty;
     public string? OrganizationType { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public long Revision { get; set; } = 1;
 }
 
 public sealed class Job : ITenantOwned
@@ -54,6 +56,8 @@ public sealed class Job : ITenantOwned
     public string Status { get; set; } = "Draft";
     public string? InternalReference { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public long Revision { get; set; } = 1;
 }
 
 public sealed class Event : ITenantOwned
@@ -67,4 +71,19 @@ public sealed class Event : ITenantOwned
     public string? TimeZoneId { get; set; }
     public string? LocationName { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public long Revision { get; set; } = 1;
+}
+
+public sealed class ActivityRecord : ITenantOwned
+{
+    public string Id { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public string ActorUserId { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public string EntityId { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+    public string BeforeJson { get; set; } = string.Empty;
+    public string AfterJson { get; set; } = string.Empty;
+    public DateTimeOffset OccurredAtUtc { get; set; }
 }

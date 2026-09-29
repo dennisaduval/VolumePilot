@@ -22,6 +22,8 @@ Open the URL printed by Vite. Its `/api` proxy targets `http://localhost:5080` b
 
 An Owner or Admin can create a staff invitation. In Development, the Staff screen exposes a local test link; open it in a separate browser session to accept as a new user. Existing users sign in with their invited email first. Production invitation email delivery is still a separate deployment requirement, and the local inbox is unavailable there.
 
+Owners and Admins can edit organization details, Job names/references, and Event names/times/locations. Parent organization and Job associations remain fixed in this increment. Staff can view planning records and their correction history. Each successful correction records the actor, timestamp, and before/after values in the same transaction as the edit. Competing edits return a conflict; the form preserves your draft while the list refreshes. Cancel and reopen the edit to start from the latest revision.
+
 ## Build
 
 ```sh
