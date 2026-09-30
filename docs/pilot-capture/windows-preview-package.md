@@ -4,6 +4,8 @@ The **Pilot Capture Windows Preview** workflow builds a self-contained Windows x
 
 The workflow publishes the desktop project in Release mode for `win-x64` with the .NET runtime included. It uploads a ZIP archive, a SHA-256 checksum file, and a `BUILD-INFO.txt` file containing the preview version, source commit, and build time. The workflow artifact is retained for 14 days.
 
+Before uploading an artifact, the workflow launches the published executable on the Windows runner, verifies that the expected Pilot Capture main window appears, and checks that the process remains running. The .NET workflow also runs a headless desktop constructor test with the production application resources and local SQLite services. These startup checks supplement the target-laptop validation.
+
 ## Running the preview
 
 1. In GitHub, open **Actions** and select **Pilot Capture Windows Preview**.
