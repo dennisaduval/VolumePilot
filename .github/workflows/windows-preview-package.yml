@@ -71,6 +71,46 @@ jobs:
           "archive_path=$archivePath" >> $env:GITHUB_OUTPUT
           "checksum_path=$checksumPath" >> $env:GITHUB_OUTPUT
 
+      - name: Verify published desktop starts
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $publishDirectory = Join-Path $env:RUNNER_TEMP 'PilotCapture-publish'
+          $executablePath = Join-Path $publishDirectory 'PilotCapture.Desktop.exe'
+          $process = Start-Process -FilePath $executablePath -WorkingDirectory $publishDirectory -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(20)
+            do {
+              Start-Sleep -Milliseconds 250
+              $process.Refresh()
+              if ($process.HasExited) {
+                throw "Pilot Capture exited during startup with code $($process.ExitCode)."
+              }
+            } while ($process.MainWindowHandle -eq [IntPtr]::Zero -and (Get-Date) -lt $deadline)
+
+            if ($process.MainWindowHandle -eq [IntPtr]::Zero) {
+              throw "Pilot Capture did not open its main window within 20 seconds."
+            }
+            if ($process.MainWindowTitle -ne 'VolumePilot | Pilot Capture') {
+              throw "Unexpected startup window: $($process.MainWindowTitle)"
+            }
+            if ($process.WaitForExit(3000)) {
+              throw "Pilot Capture exited after opening its main window with code $($process.ExitCode)."
+            }
+            Write-Host 'Published Pilot Capture opened its main window and remained running.'
+          }
+          finally {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+              [void]$process.CloseMainWindow()
+              if (-not $process.WaitForExit(5000)) {
+                $process.Kill()
+                $process.WaitForExit()
+              }
+            }
+            $process.Dispose()
+          }
+
       - name: Upload pilot preview archive
         uses: actions/upload-artifact@v4
         with:
