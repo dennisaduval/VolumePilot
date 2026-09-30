@@ -10,6 +10,7 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [x] Add an initial versioned SQLite schema and first-run database initialization.
 - [x] Persist a local installation ID and initialize station `s10`.
 - [x] Apply the VolumePilot color system and establish 48-pixel minimum touch targets for the desktop controls.
+- [x] Add a desktop constructor regression test and a published Windows executable startup smoke check in CI.
 - [ ] Build and launch on Windows 11 Pro.
 - [x] Add a Windows x64 preview-package workflow that records version, commit, build time, and SHA-256.
 - [ ] Confirm the preview package restores, publishes, and launches successfully on Windows 11 Pro.
@@ -43,3 +44,9 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - [ ] Run an actual multi-team capture offline from setup through export.
 - [ ] Verify restart recovery and missing-file reporting.
 - [ ] Test the preview package on the target laptops, then choose and package the final installer/update approach.
+
+## Hardware validation log
+
+- **2026-09-29, CAPTURE-10:** Preview `PilotCapture-0.1.0-preview-win-x64-c50d746` exited immediately at startup. Event Viewer reported an unhandled `System.NullReferenceException` in `MainWindow..ctor` at line 63, called from `App.OnFrameworkInitializationCompleted`.
+- **Startup correction ([PR #22](https://github.com/dennisaduval/VolumePilot/pull/22)):** Use Avalonia's generated `InitializeComponent()` to assign named control fields before subscribing to their events. The new desktop constructor regression test reproduced the original exception at line 63 before the correction. Preview publishing now also launches the packaged executable and requires its main window to remain open before uploading an artifact.
+- **CAPTURE-10 retest:** Pending. CI startup checks do not complete the physical Windows, touchscreen, Smart Shooter, or camera acceptance checks above.
