@@ -12,14 +12,10 @@ namespace PilotCapture.Desktop.Tests;
 public sealed class MainWindowStartupTests
 {
     [Fact]
-    public void Window_constructor_initializes_named_controls_before_wiring_events()
+    public async Task Window_constructor_initializes_named_controls_before_wiring_events()
     {
         // Use the production App resources and real capture services without opening
         // a native window or touching the operator's application data directory.
-        AppBuilder.Configure<App>()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions())
-            .SetupWithoutStarting();
-
         var root = Path.Combine(Path.GetTempPath(), $"pilot-capture-startup-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         try
@@ -32,8 +28,13 @@ public sealed class MainWindowStartupTests
             services.AddTransient<MainWindow>();
             using var provider = services.BuildServiceProvider();
             using var scope = provider.CreateScope();
-            scope.ServiceProvider.GetRequiredService<DatabaseInitializer>()
-                .InitializeAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>()
+                .InitializeAsync(TestContext.Current.CancellationToken);
+
+            // Keep all UI operations on this thread after initializing the database.
+            AppBuilder.Configure<App>()
+                .UseHeadless(new AvaloniaHeadlessPlatformOptions())
+                .SetupWithoutStarting();
 
             // This constructor threw at the first named-control event subscription
             // in the CAPTURE-10 preview when only AvaloniaXamlLoader.Load was called.
