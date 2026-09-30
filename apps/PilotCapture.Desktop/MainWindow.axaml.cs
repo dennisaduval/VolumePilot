@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -59,7 +58,9 @@ public sealed partial class MainWindow : Window
         _imageAssociationExportService = imageAssociationExportService;
         _rosterExportService = rosterExportService;
         _faceDetector = faceDetector;
-        AvaloniaXamlLoader.Load(this);
+        // The generated initializer loads XAML and assigns every named control field.
+        // Loading XAML directly leaves those fields null before the event hookups.
+        InitializeComponent();
         EventName.TextChanged += (_, _) => UpdateImportAvailability();
         PhotographerName.TextChanged += (_, _) => UpdateCaptureControls();
         UnidentifiedSubjectName.TextChanged += (_, _) => UpdateCaptureControls();
