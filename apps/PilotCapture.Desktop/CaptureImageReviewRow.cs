@@ -11,6 +11,7 @@ public sealed class CaptureImageReviewRow(CaptureImageReviewItem item, Bitmap th
     public string OriginalFileName => item.OriginalFileName;
     public int SequenceNumber => item.SequenceNumber;
     public bool IsPrimary => item.IsPrimary;
+    public bool IsSecondary => item.IsSecondary;
     public bool IsBanner => item.IsBanner;
     public CaptureImageReviewState ReviewState => item.ReviewState;
     public int? PixelWidth => item.PixelWidth;
@@ -23,14 +24,12 @@ public sealed class CaptureImageReviewRow(CaptureImageReviewItem item, Bitmap th
         {
             var flags = new List<string>();
             if (IsPrimary) flags.Add("Primary");
+            if (IsSecondary) flags.Add("Secondary");
             if (IsBanner) flags.Add("Banner");
             if (ReviewState == CaptureImageReviewState.Rejected) flags.Add("Rejected");
             var details = flags.Count == 0 ? "Pending" : string.Join(" · ", flags);
-            var dimensions = PixelWidth is { } width && PixelHeight is { } height
-                ? $"{width:N0} × {height:N0} px"
-                : "dimensions unavailable";
-            var size = ByteLength / (1024d * 1024d);
-            return $"{SequenceNumber + 1}. {OriginalFileName}\n{dimensions} · {size:N1} MB\n{details}";
+            return $"{OriginalFileName}\n{details}";
         }
     }
 }
+

@@ -43,7 +43,8 @@ public sealed partial class App : Avalonia.Application
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssociationExportService>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterExportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>());
+                _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IJobMediaService>());
             desktop.Exit += (_, _) =>
             {
                 _windowScope?.Dispose();
@@ -54,3 +55,4 @@ public sealed partial class App : Avalonia.Application
         base.OnFrameworkInitializationCompleted();
     }
 }
+

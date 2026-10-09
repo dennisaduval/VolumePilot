@@ -50,3 +50,8 @@ This checklist tracks the first usable end-to-end Windows capture build. Status 
 - **2026-09-29, CAPTURE-10:** Preview `PilotCapture-0.1.0-preview-win-x64-c50d746` exited immediately at startup. Event Viewer reported an unhandled `System.NullReferenceException` in `MainWindow..ctor` at line 63, called from `App.OnFrameworkInitializationCompleted`.
 - **Startup correction ([PR #22](https://github.com/dennisaduval/VolumePilot/pull/22)):** Use Avalonia's generated `InitializeComponent()` to assign named control fields before subscribing to their events. The new desktop constructor regression test reproduced the original exception at line 63 before the correction. Preview publishing now also launches the packaged executable and requires its main window to remain open before uploading an artifact.
 - **CAPTURE-10 retest:** Pending. CI startup checks do not complete the physical Windows, touchscreen, Smart Shooter, or camera acceptance checks above.
+
+
+### Team and Individual extension — 9 October 2026
+
+Use the [Team and Individual acceptance checks](team-individual.md#acceptance-checks-on-capture-10) for the revised screen, role rules, master publication and SPA exports. Hardware validation remains pending. Before opening an existing installation with this preview, retain a copy of its `pilot-capture.db` and `media` folder; migration 5 adds persistent membership-level image roles and edited-asset associations.

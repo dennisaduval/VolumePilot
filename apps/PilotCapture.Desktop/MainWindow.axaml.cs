@@ -27,6 +27,10 @@ public sealed partial class MainWindow : Window
     private readonly IImageAssociationExportService _imageAssociationExportService;
     private readonly IRosterExportService _rosterExportService;
     private readonly WindowsPortraitFaceDetector _faceDetector;
+    private readonly IJobMediaService _jobMediaService;
+    private IReadOnlyList<CaptureGroupChoice> _allGroups = [];
+    private int _searchVersion;
+    private int _previewVersion;
     private readonly SemaphoreSlim _captureOperationLock = new(1, 1);
     private IReadOnlyList<CaptureImageReviewRow> _captureImageRows = [];
     private Bitmap? _selectedReviewBitmap;
@@ -48,7 +52,8 @@ public sealed partial class MainWindow : Window
         IImageAssetStore imageAssetStore,
         IImageAssociationExportService imageAssociationExportService,
         IRosterExportService rosterExportService,
-        WindowsPortraitFaceDetector faceDetector)
+        WindowsPortraitFaceDetector faceDetector,
+        IJobMediaService jobMediaService)
     {
         _rosterImportService = rosterImportService;
         _captureWorkflowService = captureWorkflowService;
@@ -58,6 +63,7 @@ public sealed partial class MainWindow : Window
         _imageAssociationExportService = imageAssociationExportService;
         _rosterExportService = rosterExportService;
         _faceDetector = faceDetector;
+        _jobMediaService = jobMediaService;
         // The generated initializer loads XAML and assigns every named control field.
         // Loading XAML directly leaves those fields null before the event hookups.
         InitializeComponent();
@@ -71,6 +77,8 @@ public sealed partial class MainWindow : Window
         WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Portrait", Tag = CaptureWorkflowType.Portrait });
         WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Action", Tag = CaptureWorkflowType.Action });
         WorkflowTypeCombo.SelectedIndex = 0;
+        ExportKindCombo.ItemsSource = new[] { "Original JPEGs · team folders", "Edited PNGs · team folders", "Batch editing · original photos" };
+        ExportKindCombo.SelectedIndex = 0;
         foreach (var stationCode in new[] { "s10", "s20", "s30", "s40" })
             StationCodeCombo.Items.Add(new ComboBoxItem { Content = stationCode, Tag = stationCode });
         Loaded += async (_, _) => await LoadCaptureSetupAsync();
@@ -269,15 +277,15 @@ public sealed partial class MainWindow : Window
     {
         comboBox.Items.Clear();
         comboBox.Items.Add("(not mapped)");
-        for (var index = 0; index < headers.Count; index++)
-            comboBox.Items.Add($"[{index}] {headers[index]}");
-
-        comboBox.SelectedIndex = selectedColumn is int column ? column + 1 : 0;
+        foreach (var item in headers.Select((header, index) => (header, index)).OrderBy(x => x.header, StringComparer.CurrentCultureIgnoreCase))
+            comboBox.Items.Add(new ComboBoxItem { Content = $"{item.header} [{item.index}]", Tag = item.index });
+        comboBox.SelectedItem = comboBox.Items.OfType<ComboBoxItem>().FirstOrDefault(x => x.Tag is int column && column == selectedColumn)
+            ?? comboBox.Items[0];
         comboBox.IsEnabled = true;
     }
 
     private static int? SelectedColumn(ComboBox comboBox) =>
-        comboBox.SelectedIndex > 0 ? comboBox.SelectedIndex - 1 : null;
+        (comboBox.SelectedItem as ComboBoxItem)?.Tag as int?;
 
     private async Task LoadCaptureSetupAsync()
     {
@@ -286,6 +294,7 @@ public sealed partial class MainWindow : Window
             var events = await _captureWorkflowService.GetEventsAsync();
             _activeCaptureSession = await _captureWorkflowService.GetActiveSessionAsync();
             var stationCode = _activeCaptureSession?.StationCode ?? await _captureWorkflowService.GetStationCodeAsync();
+            MasterFolderPath.Text = await _jobMediaService.GetMasterPathAsync() ?? string.Empty;
             SmartShooterFolderPath.Text = await _captureWorkflowService.GetSmartShooterOutputPathAsync() ?? string.Empty;
             _isPopulatingCaptureChoices = true;
             SetChoices(CaptureEventCombo, events, item => item.Name, _activeCaptureSession?.EventId);
@@ -522,7 +531,19 @@ public sealed partial class MainWindow : Window
                 }
             }
             if (hasNewImages && _activeCaptureSession?.CurrentCaptureSet?.CaptureSetId == captureSet.CaptureSetId)
+            {
                 await RefreshReviewImagesAsync(latestNewCaptureImageId);
+                await RefreshCaptureSubjectsAsync();
+                if (await _jobMediaService.GetMasterPathAsync() is not null)
+                {
+                    try
+                    {
+                        var published = await _jobMediaService.PublishOriginalsAsync(session.EventId);
+                        MediaStatus.Text = $"{published.Images} originals available in {published.Location}";
+                    }
+                    catch (Exception exception) { MediaStatus.Text = $"Captured locally. Master copy pending; use Publish originals / retry: {exception.Message}"; }
+                }
+            }
         }
         catch (Exception exception)
         {
@@ -582,7 +603,11 @@ public sealed partial class MainWindow : Window
             foreach (var item in items)
             {
                 await using var assetStream = await _imageAssetStore.OpenReadAsync(item.RelativePath, CancellationToken.None);
-                var thumbnail = Bitmap.DecodeToHeight(assetStream, 112, BitmapInterpolationMode.HighQuality);
+                using var buffer = new MemoryStream();
+                await assetStream.CopyToAsync(buffer);
+                var portrait = await PortraitImageDecoder.DecodeAsync(buffer.ToArray(), 240);
+                using var imageStream = new MemoryStream(portrait);
+                var thumbnail = Bitmap.DecodeToHeight(imageStream, 136, BitmapInterpolationMode.HighQuality);
                 rows.Add(new CaptureImageReviewRow(item, thumbnail));
             }
 
@@ -590,9 +615,9 @@ public sealed partial class MainWindow : Window
             _isPopulatingReviewImages = true;
             CaptureImagesList.ItemsSource = _captureImageRows;
             var selected = rows.FirstOrDefault(row => row.Id == selectedImageId)
-                ?? rows.FirstOrDefault(row => row.IsPrimary)
-                ?? rows.FirstOrDefault();
+                ?? rows.LastOrDefault();
             CaptureImagesList.SelectedItem = selected;
+            if (selected is not null) CaptureImagesList.ScrollIntoView(selected);
             _isPopulatingReviewImages = false;
             var observedSizes = ImageDimensionMonitor.GetDistinctCaptureSizes(
                 rows.Select(row => (row.PixelWidth, row.PixelHeight)));
@@ -601,7 +626,7 @@ public sealed partial class MainWindow : Window
                 : string.Empty;
             ReviewStatus.Text = rows.Count == 0
                 ? "No images yet. Start monitoring in Capture, then photograph this subject."
-                : $"{rows.Count} image(s). Primary and Banner are independent; rejected images stay in the set for the record.{dimensionWarning}";
+                : $"{rows.Count} image(s). Primary, Secondary and Banner are saved for this athlete and team; rejected images are retained.{dimensionWarning}";
             UpdateReviewControls();
             if (selected is not null)
                 await ShowSelectedReviewImageAsync(selected);
@@ -617,12 +642,14 @@ public sealed partial class MainWindow : Window
     private async Task ShowSelectedReviewImageAsync(CaptureImageReviewRow selected)
     {
         ClearSelectedReviewPreview();
+        var previewVersion = _previewVersion;
         try
         {
             await using var assetStream = await _imageAssetStore.OpenReadAsync(selected.RelativePath, CancellationToken.None);
             using var buffer = new MemoryStream();
             await assetStream.CopyToAsync(buffer);
-            var jpegBytes = buffer.ToArray();
+            var jpegBytes = await PortraitImageDecoder.DecodeAsync(buffer.ToArray());
+            if (previewVersion != _previewVersion) return;
             using (var imageStream = new MemoryStream(jpegBytes, writable: false))
                 _selectedReviewBitmap = new Bitmap(imageStream);
 
@@ -632,6 +659,7 @@ public sealed partial class MainWindow : Window
                     : " · dimensions unavailable")
                 + $" · {selected.ByteLength / (1024d * 1024d):N1} MB"
                 + (selected.IsPrimary ? " · Primary" : string.Empty)
+                + (selected.IsSecondary ? " · Secondary" : string.Empty)
                 + (selected.IsBanner ? " · Banner" : string.Empty)
                 + (selected.ReviewState == CaptureImageReviewState.Rejected ? " · Rejected" : string.Empty);
 
@@ -648,6 +676,7 @@ public sealed partial class MainWindow : Window
                     face = null;
                     faceDetectionUnavailable = true;
                 }
+                if (previewVersion != _previewVersion) return;
                 if (face is { } faceBox)
                 {
                     _selectedFaceCrop = new CroppedBitmap(
@@ -689,11 +718,18 @@ public sealed partial class MainWindow : Window
         var top = Math.Clamp((int)Math.Floor(faceY - faceHeight * 0.75), 0, imageSize.Height - 1);
         var right = Math.Clamp((int)Math.Ceiling(faceX + faceWidth * 1.55), left + 1, imageSize.Width);
         var bottom = Math.Clamp((int)Math.Ceiling(faceY + faceHeight * 1.55), top + 1, imageSize.Height);
-        return new PixelRect(left, top, right - left, bottom - top);
+        var height = Math.Min(imageSize.Height, Math.Max(bottom - top, (int)Math.Ceiling((right - left) * 4d / 3)));
+        var width = Math.Min(imageSize.Width, (int)(height * 3d / 4));
+        left = Math.Clamp((int)(faceX + faceWidth / 2 - width / 2d), 0, imageSize.Width - width);
+        top = Math.Clamp((int)(faceY + faceHeight / 2 - height / 2d), 0, imageSize.Height - height);
+        return new PixelRect(left, top, width, height);
     }
 
     private async void OnSetPrimaryClick(object? sender, RoutedEventArgs e) =>
         await ApplyReviewActionAsync(CaptureImageReviewAction.SetPrimary);
+
+    private async void OnSetSecondaryClick(object? sender, RoutedEventArgs e) =>
+        await ApplyReviewActionAsync(CaptureImageReviewAction.SetSecondary);
 
     private async void OnToggleBannerClick(object? sender, RoutedEventArgs e) =>
         await ApplyReviewActionAsync(CaptureImageReviewAction.ToggleBanner);
@@ -770,6 +806,7 @@ public sealed partial class MainWindow : Window
 
     private void ClearSelectedReviewPreview()
     {
+        _previewVersion++;
         SelectedImagePreview.Source = null;
         _selectedFaceCrop?.Dispose();
         _selectedFaceCrop = null;
@@ -781,11 +818,13 @@ public sealed partial class MainWindow : Window
     {
         var selected = CaptureImagesList.SelectedItem as CaptureImageReviewRow;
         SetPrimaryButton.IsEnabled = selected is not null;
+        SetSecondaryButton.IsEnabled = selected is not null;
         ToggleBannerButton.IsEnabled = selected is not null;
         RejectImageButton.IsEnabled = selected is not null;
         NextSubjectButton.IsEnabled = !_isAdvancingSubject
             && _activeCaptureSession?.CurrentCaptureSet is not null;
-        ToggleBannerButton.Content = selected?.IsBanner == true ? "Remove Banner" : "Mark Banner";
+        ToggleBannerButton.Content = "Banner";
+        RejectImageButton.Content = selected?.ReviewState == CaptureImageReviewState.Rejected ? "Restore image" : "Reject image";
     }
 
     private async Task RefreshCaptureGroupsAsync(string? selectedGroupId = null)
@@ -794,8 +833,12 @@ public sealed partial class MainWindow : Window
         var groups = selectedEvent is null
             ? Array.Empty<CaptureGroupChoice>()
             : await _captureWorkflowService.GetGroupsAsync(selectedEvent.Id);
+        _allGroups = groups;
         _isPopulatingCaptureChoices = true;
-        SetChoices(CaptureGroupCombo, groups, item => item.Name,
+        var league = LeagueCombo.SelectedItem as string;
+        LeagueCombo.ItemsSource = new[] { "All leagues / divisions" }.Concat(groups.Select(x => x.LeagueName).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)).ToArray();
+        LeagueCombo.SelectedItem = league is not null && LeagueCombo.Items.Contains(league) ? league : "All leagues / divisions";
+        SetChoices(CaptureGroupCombo, FilterGroups(), item => item.Name,
             selectedGroupId ?? _activeCaptureSession?.CurrentCaptureSet?.GroupId);
         _isPopulatingCaptureChoices = false;
         await RefreshCaptureSubjectsAsync();
@@ -807,6 +850,7 @@ public sealed partial class MainWindow : Window
         var subjects = selectedGroup is null
             ? Array.Empty<CaptureSubjectChoice>()
             : await _captureWorkflowService.GetSubjectsAsync(selectedGroup.Id);
+        AthleteCount.Text = $"{subjects.Count(x => x.HasPhotos)} photographed / {subjects.Count} athletes";
         _isPopulatingCaptureChoices = true;
         SetChoices(CaptureSubjectCombo, subjects, item => FormatSubject(item),
             _activeCaptureSession?.CurrentCaptureSet?.MembershipId);
@@ -863,9 +907,14 @@ public sealed partial class MainWindow : Window
 
     private async void OnSelectSubjectClick(object? sender, RoutedEventArgs e)
     {
+        if (SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is { } subject)
+            await SelectCaptureSubjectAsync(subject);
+    }
+
+    private async Task SelectCaptureSubjectAsync(CaptureSubjectChoice subject)
+    {
         var activeSession = _activeCaptureSession;
-        if (activeSession is null || SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not { } subject)
-            return;
+        if (activeSession is null || activeSession.CurrentCaptureSet?.MembershipId == subject.MembershipId) return;
         await _captureOperationLock.WaitAsync();
         try
         {
@@ -874,8 +923,14 @@ public sealed partial class MainWindow : Window
             _observedSourceVersions.Clear();
             if (_activeCaptureSession?.Id == activeSession.Id)
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
+            _isPopulatingCaptureChoices = true;
+            LeagueCombo.SelectedIndex = 0;
+            TeamSearchBox.Text = "";
+            _isPopulatingCaptureChoices = false;
+            await RefreshCaptureGroupsAsync(captureSet.GroupId);
             UpdateCaptureControls();
             await RefreshReviewImagesAsync();
+            MainTabs.SelectedItem = ImageReviewTab;
         }
         catch (Exception exception)
         {
@@ -913,6 +968,10 @@ public sealed partial class MainWindow : Window
             ManualRosterNumber.Text = string.Empty;
             ManualRole.Text = string.Empty;
             UpdateCaptureControls();
+            _isPopulatingCaptureChoices = true;
+            LeagueCombo.SelectedIndex = 0;
+            TeamSearchBox.Text = "";
+            _isPopulatingCaptureChoices = false;
             await RefreshCaptureGroupsAsync(captureSet.GroupId);
             await RefreshReviewImagesAsync();
         }
@@ -988,7 +1047,7 @@ public sealed partial class MainWindow : Window
     private static void SetChoices<T>(ComboBox comboBox, IEnumerable<T> choices, Func<T, string> label, string? selectedId)
     {
         comboBox.Items.Clear();
-        foreach (var choice in choices)
+        foreach (var choice in choices.OrderBy(label, StringComparer.CurrentCultureIgnoreCase))
             comboBox.Items.Add(new ComboBoxItem { Content = label(choice), Tag = choice });
         var items = comboBox.Items.OfType<ComboBoxItem>().ToArray();
         comboBox.SelectedItem = items.FirstOrDefault(item => GetChoiceId(item.Tag)?.Equals(selectedId, StringComparison.Ordinal) == true)
@@ -1014,7 +1073,83 @@ public sealed partial class MainWindow : Window
         var details = new[] { subject.RosterNumber, subject.Role }
             .Where(value => !string.IsNullOrWhiteSpace(value));
         var suffix = string.Join(" · ", details);
-        return suffix.Length == 0 ? subject.DisplayName : $"{subject.DisplayName} · {suffix}";
+        var name = suffix.Length == 0 ? subject.DisplayName : $"{subject.DisplayName} · {suffix}";
+        return subject.HasPhotos ? $"{name} · ✓ photographed" : name;
+    }
+
+    private IEnumerable<CaptureGroupChoice> FilterGroups() => _allGroups.Where(x =>
+        (LeagueCombo.SelectedIndex <= 0 || x.LeagueName == LeagueCombo.SelectedItem as string)
+        && x.Name.Contains(TeamSearchBox.Text ?? "", StringComparison.OrdinalIgnoreCase));
+
+    private async void OnTeamSearchChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_isPopulatingCaptureChoices) return;
+        _isPopulatingCaptureChoices = true;
+        SetChoices(CaptureGroupCombo, FilterGroups(), x => x.Name, _activeCaptureSession?.CurrentCaptureSet?.GroupId);
+        _isPopulatingCaptureChoices = false;
+        await RefreshCaptureSubjectsAsync();
+    }
+    private void OnLeagueChanged(object? sender, SelectionChangedEventArgs e) => OnTeamSearchChanged(sender, null!);
+    private async void OnAthleteSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_isPopulatingCaptureChoices && SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is { } subject)
+            await SelectCaptureSubjectAsync(subject);
+    }
+    private async void OnSubjectSearchChanged(object? sender, TextChangedEventArgs e)
+    {
+        var version = ++_searchVersion;
+        var query = SubjectSearchBox.Text ?? "";
+        if (string.IsNullOrWhiteSpace(query)) { SubjectSearchResults.IsVisible = false; return; }
+        var job = SelectedChoice<CaptureEventChoice>(CaptureEventCombo);
+        if (job is null) return;
+        await _captureOperationLock.WaitAsync();
+        try
+        {
+            var matches = await _captureWorkflowService.SearchSubjectsAsync(job.Id, query);
+            if (version != _searchVersion) return;
+            SubjectSearchResults.ItemsSource = matches.Select(x => new ListBoxItem { Content = FormatSubject(x) + " · " + x.GroupName, Tag = x, MinHeight = 48 }).ToArray();
+            SubjectSearchResults.IsVisible = true;
+        }
+        catch (Exception exception) { ReviewStatus.Text = $"Search unavailable: {exception.Message}"; }
+        finally { _captureOperationLock.Release(); }
+    }
+    private async void OnSearchResultSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (SubjectSearchResults.SelectedItem is ListBoxItem { Tag: CaptureSubjectChoice subject })
+        {
+            SubjectSearchBox.Text = "";
+            await SelectCaptureSubjectAsync(subject);
+        }
+    }
+    private async void OnChooseMasterFolderClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose master VP database folder", AllowMultiple = false });
+        if (folders.Count == 0 || folders[0].TryGetLocalPath() is not { } path) return;
+        await _captureOperationLock.WaitAsync();
+        try { await _jobMediaService.SetMasterPathAsync(path); MasterFolderPath.Text = path; MediaStatus.Text = "Master folder saved. Publish originals to populate it."; }
+        catch (Exception exception) { MediaStatus.Text = exception.Message; }
+        finally { _captureOperationLock.Release(); }
+    }
+    private async Task RunMediaActionAsync(Func<string, Task<JobMediaResult>> action)
+    {
+        var job = SelectedChoice<CaptureEventChoice>(CaptureEventCombo);
+        if (job is null) { MediaStatus.Text = "Select a job first."; return; }
+        await _captureOperationLock.WaitAsync();
+        try { var result = await action(job.Id); MediaStatus.Text = $"{result.Images} image(s): {result.Location}"; }
+        catch (Exception exception) { MediaStatus.Text = $"Image operation could not finish: {exception.Message}"; }
+        finally { _captureOperationLock.Release(); }
+    }
+    private async void OnPublishOriginalsClick(object? sender, RoutedEventArgs e) =>
+        await RunMediaActionAsync(id => _jobMediaService.PublishOriginalsAsync(id));
+    private async void OnAssociateEditedClick(object? sender, RoutedEventArgs e) =>
+        await RunMediaActionAsync(id => _jobMediaService.AssociateEditedAsync(id));
+    private async void OnExportJobClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose export destination", AllowMultiple = false });
+        if (folders.Count == 0 || folders[0].TryGetLocalPath() is not { } path) return;
+        var kind = ExportKindCombo.SelectedIndex switch { 1 => JobImageExportKind.EditedPng, 2 => JobImageExportKind.BatchEditingOriginals, _ => JobImageExportKind.Originals };
+        await RunMediaActionAsync(id => _jobMediaService.ExportAsync(id, path, kind));
     }
 
 }
+

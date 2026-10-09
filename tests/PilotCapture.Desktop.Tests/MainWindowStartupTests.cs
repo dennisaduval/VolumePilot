@@ -46,6 +46,10 @@ public sealed class MainWindowStartupTests
                 Assert.Equal(2, workflow.Items.Count);
                 Assert.Equal(0, workflow.SelectedIndex);
                 Assert.Equal(4, station.Items.Count);
+                Assert.IsType<Button>(window.FindControl<Button>("SetSecondaryButton"));
+                Assert.IsType<TextBox>(window.FindControl<TextBox>("SubjectSearchBox")).Text = "dav";
+                Assert.IsType<TextBox>(window.FindControl<TextBox>("TeamSearchBox")).Text = "team";
+                Assert.Equal(3, Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ExportKindCombo")).Items.Count);
 
                 // Exercise the event subscriptions too: these handlers access other
                 // generated fields, so merely finding the XAML tree is insufficient.
@@ -72,3 +76,4 @@ public sealed class MainWindowStartupTests
         }
     }
 }
+

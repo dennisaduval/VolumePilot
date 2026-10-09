@@ -42,30 +42,49 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
     public async Task<IReadOnlyList<CaptureEventChoice>> GetEventsAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Events.AsNoTracking()
             .Where(captureEvent => !captureEvent.IsArchived)
-            .OrderByDescending(captureEvent => captureEvent.Id)
+            .OrderBy(captureEvent => captureEvent.Name)
             .Select(captureEvent => new CaptureEventChoice(captureEvent.Id, captureEvent.Name))
             .ToListAsync(cancellationToken);
 
-    public async Task<IReadOnlyList<CaptureGroupChoice>> GetGroupsAsync(string eventId, CancellationToken cancellationToken = default) =>
-        await dbContext.Groups.AsNoTracking()
-            .Where(group => group.EventId == eventId && group.IsActive)
-            .OrderBy(group => group.Name)
-            .Select(group => new CaptureGroupChoice(group.Id, group.EventId, group.Name))
+    public async Task<IReadOnlyList<CaptureGroupChoice>> GetGroupsAsync(string eventId, CancellationToken cancellationToken = default)
+    {
+        var groups = await dbContext.Groups.AsNoTracking().Where(x => x.EventId == eventId && x.IsActive)
+            .OrderBy(x => x.Name).ToListAsync(cancellationToken);
+        var members = await dbContext.Memberships.AsNoTracking().Where(x => x.Group!.EventId == eventId && x.IsActive)
             .ToListAsync(cancellationToken);
+        return groups.Select(g => new CaptureGroupChoice(g.Id, g.EventId, g.Name,
+            members.Where(m => m.GroupId == g.Id).Select(m => m.SpaDataJson is { } json
+                ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,string>>(json)!.GetValueOrDefault("LEAGUENAME")
+                : PilotCapture.Application.Rosters.SpaRosterFields.ReadSource(m.SourceDataJson).GetValueOrDefault("LEAGUENAME"))
+                .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)))).ToArray();
+    }
 
     public async Task<IReadOnlyList<CaptureSubjectChoice>> GetSubjectsAsync(string groupId, CancellationToken cancellationToken = default) =>
         await dbContext.Memberships.AsNoTracking()
             .Where(membership => membership.GroupId == groupId && membership.IsActive && membership.Subject!.IsActive)
-            .OrderBy(membership => membership.Subject!.LastName)
-            .ThenBy(membership => membership.Subject!.FirstName)
+            .OrderBy(membership => membership.Subject!.DisplayName)
             .ThenBy(membership => membership.Id)
             .Select(membership => new CaptureSubjectChoice(
                 membership.SubjectId,
                 membership.Id,
                 membership.Subject!.DisplayName,
                 membership.RosterNumber,
-                membership.Role))
+                membership.Role,
+                dbContext.CaptureImages.Any(image => image.SelectionScopeId == membership.Id),
+                membership.GroupId, membership.Group!.Name))
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<CaptureSubjectChoice>> SearchSubjectsAsync(string eventId, string query, CancellationToken cancellationToken = default)
+    {
+        var members = await dbContext.Memberships.AsNoTracking()
+            .Where(x => x.Subject!.EventId == eventId && x.IsActive && x.Subject.IsActive && x.Group!.IsActive)
+            .Select(x => new CaptureSubjectChoice(x.SubjectId, x.Id, x.Subject!.DisplayName, x.RosterNumber, x.Role,
+                dbContext.CaptureImages.Any(i => i.SelectionScopeId == x.Id), x.GroupId, x.Group!.Name))
+            .ToListAsync(cancellationToken);
+        var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return members.Where(x => words.All(w => $"{x.DisplayName} {x.RosterNumber} {x.GroupName}".Contains(w, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase).ThenBy(x => x.GroupName).ToArray();
+    }
 
     public async Task<ActiveCaptureSession?> GetActiveSessionAsync(CancellationToken cancellationToken = default)
     {
@@ -201,7 +220,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         };
         dbContext.CaptureSets.Add(captureSet);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new CaptureSetResult(captureSet.Id, subjectName, false, membership.GroupId, membership.Id, startedAt);
+        return new CaptureSetResult(captureSet.Id, subjectName, membership.Subject.IdentityStatus == SubjectIdentityStatus.Unidentified, membership.GroupId, membership.Id, startedAt);
     }
 
     public async Task<CaptureSetResult> CreateManualSubjectAsync(
@@ -372,17 +391,10 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             {
                 groupId = currentMembership.GroupId;
                 var groupSubjects = await GetSubjectsAsync(currentMembership.GroupId, cancellationToken);
-                var currentIndex = -1;
-                for (var index = 0; index < groupSubjects.Count; index++)
-                {
-                    if (groupSubjects[index].MembershipId == currentMembership.Id)
-                    {
-                        currentIndex = index;
-                        break;
-                    }
-                }
-                if (currentIndex >= 0 && currentIndex + 1 < groupSubjects.Count)
-                    nextSubject = groupSubjects[currentIndex + 1];
+                // Start after the current athlete, wrap once, skip photographed memberships.
+                var currentIndex = groupSubjects.ToList().FindIndex(x => x.MembershipId == currentMembership.Id);
+                nextSubject = groupSubjects.Skip(currentIndex + 1).Concat(groupSubjects.Take(Math.Max(0, currentIndex)))
+                    .FirstOrDefault(x => !x.HasPhotos && x.MembershipId != currentMembership.Id);
             }
         }
 
@@ -436,3 +448,4 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             set.CompletedAtUtc = completedAtUtc;
     }
 }
+

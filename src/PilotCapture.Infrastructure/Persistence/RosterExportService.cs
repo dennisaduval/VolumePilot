@@ -64,7 +64,7 @@ public sealed class RosterExportService(PilotCaptureDbContext dbContext) : IRost
 
         await using var writer = new StreamWriter(
             destination, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), 64 * 1024, leaveOpen: true);
-        await writer.WriteLineAsync(string.Join(",", Headers.Select(Escape)));
+        await writer.WriteLineAsync(string.Join(",", Headers.Concat(SpaRosterFields.Columns).Select(Escape)));
         foreach (var row in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -73,7 +73,15 @@ public sealed class RosterExportService(PilotCaptureDbContext dbContext) : IRost
                 row.EventName, row.SubjectId, row.MembershipId, row.FirstName, row.LastName,
                 row.DisplayName, row.IdentityStatus, row.GroupName, row.RosterNumber, row.Role, row.RecordSource
             };
-            await writer.WriteLineAsync(string.Join(",", values.Select(Escape)));
+            var membership = subjects.SelectMany(x => x.Memberships).FirstOrDefault(x => x.Id == row.MembershipId);
+            var fields = membership?.SpaDataJson is { } json
+                ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,string>>(json)! : SpaRosterFields.ReadSource(membership?.SourceDataJson);
+            fields["FIRSTNAME"] = row.FirstName ?? "";
+            fields["LASTNAME"] = row.LastName ?? "";
+            fields.TryAdd("NAME", row.DisplayName);
+            fields["NUMBER"] = row.RosterNumber ?? fields.GetValueOrDefault("NUMBER", "");
+            if (!fields.ContainsKey("CLASS")) fields.TryAdd("TEAMNAME", row.GroupName ?? "");
+            await writer.WriteLineAsync(string.Join(",", values.Concat(SpaRosterFields.Columns.Select(c => fields.GetValueOrDefault(c))).Select(Escape)));
         }
 
         await writer.FlushAsync(cancellationToken);
@@ -88,3 +96,4 @@ public sealed class RosterExportService(PilotCaptureDbContext dbContext) : IRost
             : value;
     }
 }
+

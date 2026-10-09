@@ -92,6 +92,7 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
                         Role = row.ClassOrCategory,
                         SourceRowKey = row.SourceRecordNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         SourceDataJson = row.SourceDataJson,
+                        SpaDataJson = row.SpaDataJson,
                         CreatedAtUtc = now,
                         IsActive = true
                     };
@@ -123,3 +124,4 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
 
     public static string ComputeSha256(ReadOnlySpan<byte> content) => Convert.ToHexString(SHA256.HashData(content));
 }
+
