@@ -1017,6 +1017,7 @@ public sealed partial class MainWindow : Window
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = captureSet };
             UpdateCaptureControls();
             UnidentifiedSubjectName.Text = string.Empty;
+            await RefreshCaptureSubjectsAsync();
             await RefreshReviewImagesAsync();
         }
         catch (Exception exception)
