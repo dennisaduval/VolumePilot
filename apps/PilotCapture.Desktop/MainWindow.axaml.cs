@@ -348,6 +348,7 @@ public sealed partial class MainWindow : Window
         if (file is null)
             return;
 
+        await _captureOperationLock.WaitAsync();
         try
         {
             await using var output = await file.OpenWriteAsync();
@@ -358,6 +359,7 @@ public sealed partial class MainWindow : Window
         {
             SessionStatus.Text = $"Roster export failed: {exception.Message}";
         }
+        finally { _captureOperationLock.Release(); }
     }
 
     private async void OnExportImageAssociationsClick(object? sender, RoutedEventArgs e)
@@ -377,6 +379,7 @@ public sealed partial class MainWindow : Window
         if (file is null)
             return;
 
+        await _captureOperationLock.WaitAsync();
         try
         {
             await using var output = await file.OpenWriteAsync();
@@ -387,6 +390,7 @@ public sealed partial class MainWindow : Window
         {
             ImageIngestStatus.Text = $"Image association export failed: {exception.Message}";
         }
+        finally { _captureOperationLock.Release(); }
     }
 
     private static string MakeSafeFileName(string value)
@@ -429,6 +433,7 @@ public sealed partial class MainWindow : Window
         if (folders.Count == 0)
             return;
 
+        await _captureOperationLock.WaitAsync();
         try
         {
             var path = folders[0].Path.LocalPath;
@@ -442,6 +447,7 @@ public sealed partial class MainWindow : Window
         {
             ImageIngestStatus.Text = $"Output folder could not be saved: {exception.Message}";
         }
+        finally { _captureOperationLock.Release(); }
     }
 
     private void OnMonitorFolderClick(object? sender, RoutedEventArgs e)

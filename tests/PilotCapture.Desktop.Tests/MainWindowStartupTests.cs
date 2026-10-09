@@ -48,10 +48,10 @@ public sealed class MainWindowStartupTests
                 Assert.Equal(2, workflow.Items.Count);
                 Assert.Equal(0, workflow.SelectedIndex);
                 Assert.Equal(4, station.Items.Count);
-                using var portraitStream = new MemoryStream(portraitBytes);
-                using var portraitBitmap = new Avalonia.Media.Imaging.Bitmap(portraitStream);
-                Assert.Equal(2, portraitBitmap.PixelSize.Width);
-                Assert.Equal(4, portraitBitmap.PixelSize.Height);
+                // Headless Avalonia substitutes a 1x1 bitmap. Inspect the real Windows
+                // decoder's PNG IHDR instead of testing that rendering placeholder.
+                Assert.Equal(2, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(portraitBytes.AsSpan(16, 4)));
+                Assert.Equal(4, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(portraitBytes.AsSpan(20, 4)));
                 Assert.IsType<Button>(window.FindControl<Button>("SetSecondaryButton"));
                 Assert.IsType<TextBox>(window.FindControl<TextBox>("SubjectSearchBox")).Text = "dav";
                 Assert.IsType<TextBox>(window.FindControl<TextBox>("TeamSearchBox")).Text = "team";
