@@ -28,6 +28,9 @@ public sealed partial class MainWindow : Window
     private readonly IRosterExportService _rosterExportService;
     private readonly WindowsPortraitFaceDetector _faceDetector;
     private readonly IJobMediaService _jobMediaService;
+    private readonly IOriginalPublicationService _originalPublication;
+    private readonly HashSet<string> _pendingMasterJobs = new(StringComparer.Ordinal);
+    private bool _isPublishingOriginals;
     private IReadOnlyList<CaptureGroupChoice> _allGroups = [];
     private int _searchVersion;
     private int _previewVersion;
@@ -53,7 +56,8 @@ public sealed partial class MainWindow : Window
         IImageAssociationExportService imageAssociationExportService,
         IRosterExportService rosterExportService,
         WindowsPortraitFaceDetector faceDetector,
-        IJobMediaService jobMediaService)
+        IJobMediaService jobMediaService,
+        IOriginalPublicationService originalPublication)
     {
         _rosterImportService = rosterImportService;
         _captureWorkflowService = captureWorkflowService;
@@ -64,6 +68,7 @@ public sealed partial class MainWindow : Window
         _rosterExportService = rosterExportService;
         _faceDetector = faceDetector;
         _jobMediaService = jobMediaService;
+        _originalPublication = originalPublication;
         // The generated initializer loads XAML and assigns every named control field.
         // Loading XAML directly leaves those fields null before the event hookups.
         InitializeComponent();
@@ -547,14 +552,7 @@ public sealed partial class MainWindow : Window
                 await RefreshReviewImagesAsync(latestNewCaptureImageId);
                 await RefreshCaptureSubjectsAsync();
                 if (await _jobMediaService.GetMasterPathAsync() is not null)
-                {
-                    try
-                    {
-                        var published = await _jobMediaService.PublishOriginalsAsync(session.EventId);
-                        MediaStatus.Text = $"{published.Images} originals available in {published.Location}";
-                    }
-                    catch (Exception exception) { MediaStatus.Text = $"Captured locally. Master copy pending; use Publish originals / retry: {exception.Message}"; }
-                }
+                    QueueMasterPublication(session.EventId);
             }
         }
         catch (Exception exception)
@@ -1160,8 +1158,38 @@ public sealed partial class MainWindow : Window
         catch (Exception exception) { MediaStatus.Text = $"Image operation could not finish: {exception.Message}"; }
         finally { _captureOperationLock.Release(); }
     }
-    private async void OnPublishOriginalsClick(object? sender, RoutedEventArgs e) =>
-        await RunMediaActionAsync(id => _jobMediaService.PublishOriginalsAsync(id));
+    private void OnPublishOriginalsClick(object? sender, RoutedEventArgs e)
+    {
+        var job = SelectedChoice<CaptureEventChoice>(CaptureEventCombo);
+        if (job is null) { MediaStatus.Text = "Select a job first."; return; }
+        QueueMasterPublication(job.Id);
+    }
+
+    private async void QueueMasterPublication(string eventId)
+    {
+        _pendingMasterJobs.Add(eventId);
+        if (_isPublishingOriginals) return;
+        _isPublishingOriginals = true;
+        try
+        {
+            while (_pendingMasterJobs.Count > 0)
+            {
+                var job = _pendingMasterJobs.First();
+                _pendingMasterJobs.Remove(job);
+                try
+                {
+                    MediaStatus.Text = "Copying originals to the master folder; local capture remains available.";
+                    var result = await _originalPublication.PublishAsync(job);
+                    MediaStatus.Text = $"{result.Images} originals available in {result.Location}";
+                }
+                catch (Exception exception)
+                {
+                    MediaStatus.Text = $"Captured locally. Master copy pending; use Publish originals / retry: {exception.Message}";
+                }
+            }
+        }
+        finally { _isPublishingOriginals = false; }
+    }
     private async void OnAssociateEditedClick(object? sender, RoutedEventArgs e) =>
         await RunMediaActionAsync(id => _jobMediaService.AssociateEditedAsync(id));
     private async void OnExportJobClick(object? sender, RoutedEventArgs e)

@@ -10,3 +10,8 @@ public interface IJobMediaService
     Task<JobMediaResult> AssociateEditedAsync(string eventId, CancellationToken cancellationToken = default);
     Task<JobMediaResult> ExportAsync(string eventId, string destination, JobImageExportKind kind, CancellationToken cancellationToken = default);
 }
+
+public interface IOriginalPublicationService
+{
+    Task<JobMediaResult> PublishAsync(string eventId, CancellationToken cancellationToken = default);
+}

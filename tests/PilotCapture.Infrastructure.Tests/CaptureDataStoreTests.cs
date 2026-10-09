@@ -286,6 +286,12 @@ public sealed class CaptureDataStoreTests
             await exporter.SetMasterPathAsync(master, token);
             Assert.Equal(3, (await exporter.PublishOriginalsAsync(eventId, token)).Images);
             Assert.Equal(3, (await exporter.PublishOriginalsAsync(eventId, token)).Images);
+            var masterOriginal = Path.Combine(master, "Original Images", eventId, images[0].Asset.Id + ".jpg");
+            await File.WriteAllBytesAsync(masterOriginal, [1, 2, 3], token);
+            await Assert.ThrowsAsync<IOException>(() => exporter.PublishOriginalsAsync(eventId, token));
+            Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(masterOriginal, token));
+            Assert.True(new FileSystemImageAssetStore(media).Exists(images[0].Asset.RelativePath));
+            await File.WriteAllBytesAsync(masterOriginal, [255, 216, 255, 0], token);
             var batch = await exporter.ExportAsync(eventId, root, JobImageExportKind.BatchEditingOriginals, token);
             Assert.Equal(2, Directory.GetFiles(Path.Combine(batch.Location, "original photos"), "*.jpg").Length);
             Assert.True(File.Exists(Path.Combine(batch.Location, "original photos", images[0].Asset.Id + ".jpg")));
