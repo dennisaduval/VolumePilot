@@ -81,5 +81,16 @@ public sealed class RosterImportPreviewTests
         Assert.Equal(document.Rows[0].ToSourceDataJson(), row.SourceDataJson);
     }
 
+    [Fact]
+    public void Same_team_names_in_different_leagues_remain_distinct_groups()
+    {
+        const string csv = "FIRSTNAME,LASTNAME,TEAMNAME,LEAGUENAME\r\nDave,Smith,Falcons,Junior\r\nDave,Smith,Falcons,Senior\r\n";
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(csv));
+        var rows = RosterImportPreviewBuilder.Build(RosterCsvReader.Read(input), new RosterColumnMapping(0, 1, 2, null, null, null));
+        Assert.Equal("Junior / Falcons", rows[0].GroupName);
+        Assert.Equal("Senior / Falcons", rows[1].GroupName);
+        Assert.All(rows, x => Assert.Equal(2, x.PotentialCrossGroupNameMatchCount));
+    }
+
 }
 

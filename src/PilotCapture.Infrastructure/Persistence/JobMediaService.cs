@@ -113,7 +113,9 @@ public sealed class JobMediaService(PilotCaptureDbContext db, IImageAssetStore s
                 var groupKey = member?.GroupId ?? "unassigned";
                 if (!teamFolders.TryGetValue(groupKey, out var teamFolder))
                 {
-                    teamFolder = SafeName(member?.Group?.Name ?? "Unassigned");
+                    var folderLabel = fields.GetValueOrDefault("TEAMNAME");
+                    if (string.IsNullOrWhiteSpace(folderLabel)) folderLabel = fields.GetValueOrDefault("CLASS");
+                    teamFolder = SafeName(string.IsNullOrWhiteSpace(folderLabel) ? member?.Group?.Name ?? "Unassigned" : folderLabel);
                     var baseFolder = teamFolder;
                     for (var n = 2; !usedFolders.Add(teamFolder); n++) teamFolder = baseFolder + "_" + n;
                     teamFolders.Add(groupKey, teamFolder);

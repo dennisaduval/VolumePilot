@@ -95,8 +95,10 @@ public static class RosterImportPreviewBuilder
             var firstName = GetValue(row, mapping.FirstNameColumn);
             var lastName = GetValue(row, mapping.LastNameColumn);
             var normalizedName = NormalizeName(firstName, lastName);
+            var sourceFields = SpaRosterFields.ReadSource(row.ToSourceDataJson());
             var groupParts = new[]
             {
+                sourceFields.GetValueOrDefault("LEAGUENAME"),
                 GetValue(row, mapping.TeamOrSchoolColumn),
                 GetValue(row, mapping.SportOrGroupColumn)
             }.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim());

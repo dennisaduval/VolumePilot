@@ -52,11 +52,16 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             .OrderBy(x => x.Name).ToListAsync(cancellationToken);
         var members = await dbContext.Memberships.AsNoTracking().Where(x => x.Group!.EventId == eventId && x.IsActive)
             .ToListAsync(cancellationToken);
-        return groups.Select(g => new CaptureGroupChoice(g.Id, g.EventId, g.Name,
-            members.Where(m => m.GroupId == g.Id).Select(m => m.SpaDataJson is { } json
+        return groups.Select(g =>
+        {
+            var league = members.Where(m => m.GroupId == g.Id).Select(m => m.SpaDataJson is { } json
                 ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,string>>(json)!.GetValueOrDefault("LEAGUENAME")
                 : PilotCapture.Application.Rosters.SpaRosterFields.ReadSource(m.SourceDataJson).GetValueOrDefault("LEAGUENAME"))
-                .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)))).ToArray();
+                .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+            var name = league is not null && g.Name.StartsWith(league + " / ", StringComparison.Ordinal)
+                ? g.Name[(league.Length + 3)..] : g.Name;
+            return new CaptureGroupChoice(g.Id, g.EventId, name, league);
+        }).ToArray();
     }
 
     public async Task<IReadOnlyList<CaptureSubjectChoice>> GetSubjectsAsync(string groupId, CancellationToken cancellationToken = default) =>
@@ -281,6 +286,9 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
                 RosterNumber = rosterNumber,
                 Role = role,
                 SourceDataJson = "{\"source\":\"photographer-entry\"}",
+                SpaDataJson = System.Text.Json.JsonSerializer.Serialize(role is null
+                    ? new Dictionary<string,string> { ["TEAMNAME"] = group.Name }
+                    : new Dictionary<string,string> { ["TEAMNAME"] = group.Name, ["CLASS"] = role }),
                 CreatedAtUtc = now
             };
             dbContext.Memberships.Add(membership);
