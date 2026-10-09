@@ -12,7 +12,8 @@ public enum CaptureImageReviewAction
 {
     SetPrimary = 0,
     ToggleBanner = 1,
-    Reject = 2
+    Reject = 2,
+    SetSecondary = 3
 }
 
 public sealed record CaptureImageReviewItem(
@@ -25,7 +26,8 @@ public sealed record CaptureImageReviewItem(
     bool IsBanner,
     int? PixelWidth,
     int? PixelHeight,
-    long ByteLength);
+    long ByteLength,
+    bool IsSecondary = false);
 
 public interface IImageReviewService
 {
@@ -102,3 +104,4 @@ public sealed record ImageIngestResult(
     string Sha256,
     int SequenceNumber,
     bool AlreadyImported);
+

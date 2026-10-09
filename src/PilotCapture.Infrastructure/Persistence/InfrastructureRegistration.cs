@@ -34,7 +34,10 @@ public static class InfrastructureRegistration
         services.AddScoped<ICaptureDataStore, CaptureDataStore>();
         services.AddScoped<IImageIngestService, ImageIngestService>();
         services.AddScoped<IImageReviewService, ImageReviewService>();
+        services.AddScoped<IJobMediaService, JobMediaService>();
+        services.AddSingleton<IOriginalPublicationService, OriginalPublicationService>();
         services.AddScoped<IImageAssociationExportService, ImageAssociationExportService>();
         return services;
     }
 }
+

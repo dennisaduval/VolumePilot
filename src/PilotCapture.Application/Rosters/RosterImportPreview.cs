@@ -71,7 +71,8 @@ public sealed record RosterPreviewRow(
     string? PotentialMatchKey,
     int PotentialCrossGroupNameMatchCount,
     bool HasExpectedFieldCount,
-    string SourceDataJson);
+    string SourceDataJson,
+    string? SpaDataJson = null);
 
 public static class RosterImportPreviewBuilder
 {
@@ -94,8 +95,10 @@ public static class RosterImportPreviewBuilder
             var firstName = GetValue(row, mapping.FirstNameColumn);
             var lastName = GetValue(row, mapping.LastNameColumn);
             var normalizedName = NormalizeName(firstName, lastName);
+            var sourceFields = SpaRosterFields.ReadSource(row.ToSourceDataJson());
             var groupParts = new[]
             {
+                sourceFields.GetValueOrDefault("LEAGUENAME"),
                 GetValue(row, mapping.TeamOrSchoolColumn),
                 GetValue(row, mapping.SportOrGroupColumn)
             }.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim());
@@ -133,7 +136,20 @@ public static class RosterImportPreviewBuilder
             possibleMatches.ContainsKey(candidate.NormalizedName) ? candidate.NormalizedName : null,
             possibleMatches.GetValueOrDefault(candidate.NormalizedName),
             candidate.Row.HasExpectedFieldCount,
-            candidate.Row.ToSourceDataJson())).ToArray();
+            candidate.Row.ToSourceDataJson(),
+            BuildSpaData(candidate, mapping))).ToArray();
+    }
+
+    private static string BuildSpaData(PreviewCandidate candidate, RosterColumnMapping mapping)
+    {
+        var fields = SpaRosterFields.ReadSource(candidate.Row.ToSourceDataJson());
+        fields["FIRSTNAME"] = candidate.FirstName ?? "";
+        fields["LASTNAME"] = candidate.LastName ?? "";
+        if (mapping.RosterNumberColumn is not null) fields["NUMBER"] = candidate.RosterNumber ?? "";
+        // Retain separate TEAMNAME, SCHOOLNAME, CLASS and POSITION rather than conflating them.
+        if (!fields.ContainsKey("TEAMNAME") && !fields.ContainsKey("SCHOOLNAME") && !fields.ContainsKey("CLASS"))
+            fields["TEAMNAME"] = GetValue(candidate.Row, mapping.TeamOrSchoolColumn) ?? candidate.GroupName;
+        return System.Text.Json.JsonSerializer.Serialize(fields);
     }
 
     private static string? GetValue(RosterCsvRow row, int? columnIndex) =>
@@ -181,3 +197,4 @@ public interface IRosterImportService
 {
     Task<RosterImportResult> ImportAsync(RosterImportCommand command, CancellationToken cancellationToken = default);
 }
+

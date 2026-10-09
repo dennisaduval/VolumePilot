@@ -31,6 +31,8 @@ public sealed class MainWindowStartupTests
             await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>()
                 .InitializeAsync(TestContext.Current.CancellationToken);
 
+            var portraitBytes = await PortraitImageDecoder.DecodeAsync(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAIAAADwyuo0AAAAEElEQVR4nGMwSJgARwzIHAByGgkBW9L7BQAAAABJRU5ErkJggg=="), 100);
+
             // Keep all UI operations on this thread after initializing the database.
             AppBuilder.Configure<App>()
                 .UseHeadless(new AvaloniaHeadlessPlatformOptions())
@@ -46,6 +48,14 @@ public sealed class MainWindowStartupTests
                 Assert.Equal(2, workflow.Items.Count);
                 Assert.Equal(0, workflow.SelectedIndex);
                 Assert.Equal(4, station.Items.Count);
+                // Headless Avalonia substitutes a 1x1 bitmap. Inspect the real Windows
+                // decoder's PNG IHDR instead of testing that rendering placeholder.
+                Assert.Equal(2, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(portraitBytes.AsSpan(16, 4)));
+                Assert.Equal(4, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(portraitBytes.AsSpan(20, 4)));
+                Assert.IsType<Button>(window.FindControl<Button>("SetSecondaryButton"));
+                Assert.IsType<TextBox>(window.FindControl<TextBox>("SubjectSearchBox")).Text = "dav";
+                Assert.IsType<TextBox>(window.FindControl<TextBox>("TeamSearchBox")).Text = "team";
+                Assert.Equal(3, Assert.IsType<ComboBox>(window.FindControl<ComboBox>("ExportKindCombo")).Items.Count);
 
                 // Exercise the event subscriptions too: these handlers access other
                 // generated fields, so merely finding the XAML tree is insufficient.
@@ -72,3 +82,4 @@ public sealed class MainWindowStartupTests
         }
     }
 }
+

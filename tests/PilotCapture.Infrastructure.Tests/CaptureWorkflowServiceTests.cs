@@ -167,4 +167,43 @@ public sealed class CaptureWorkflowServiceTests
         Assert.Equal("Walk-in 1", unknown.DisplayName);
         Assert.Empty(await dbContext.Memberships.ToListAsync(cancellationToken));
     }
+    [Fact]
+    public async Task Completion_skips_photographed_memberships_and_search_narrows_partial_names()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(token);
+        await using var db = new PilotCaptureDbContext(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(connection).Options);
+        await new DatabaseInitializer(db).InitializeAsync(token);
+        var job = new PilotCapture.Domain.Event { Name = "League" };
+        var group = new Group { EventId = job.Id, Name = "Team" };
+        db.Events.Add(job); db.Groups.Add(group);
+        foreach (var name in new[] { "Dave Adams", "Dave Brown", "David Cole" })
+        {
+            var subject = new Subject { EventId = job.Id, DisplayName = name, FirstName = name.Split(' ')[0], LastName = name.Split(' ')[1] };
+            db.Subjects.Add(subject);
+            db.Memberships.Add(new Membership { SubjectId = subject.Id, GroupId = group.Id });
+        }
+        await db.SaveChangesAsync(token);
+        var workflow = new CaptureWorkflowService(db);
+        var session = await workflow.StartSessionAsync(job.Id, "Photographer", CaptureWorkflowType.Portrait, token);
+        var choices = await workflow.GetSubjectsAsync(group.Id, token);
+        var photographed = await workflow.SelectSubjectAsync(session.Id, choices[1].MembershipId, token);
+        var asset = new ImageAsset { RelativePath = "photo.jpg", OriginalFileName = "photo.jpg" };
+        var image = new CaptureImage { CaptureSetId = photographed.CaptureSetId, ImageAssetId = asset.Id };
+        var installation = await db.LocalInstallations.SingleAsync(token);
+        await new CaptureDataStore(db).AddImageAsync(image, asset, new AuditEntry { EntityType = "capture_image", EntityId = image.Id, Action = "image.ingested", InstallationId = installation.InstallationId, StationCode = "s10" }, token);
+        await workflow.SelectSubjectAsync(session.Id, choices[0].MembershipId, token);
+        var next = await workflow.NextSubjectAsync(session.Id, token);
+        Assert.Equal("David Cole", next!.SubjectName);
+        var wrap = await workflow.NextSubjectAsync(session.Id, token);
+        Assert.Equal("Dave Adams", wrap!.SubjectName);
+        Assert.Equal(3, (await workflow.SearchSubjectsAsync(job.Id, "dav", token)).Count);
+        Assert.Equal(2, (await workflow.SearchSubjectsAsync(job.Id, "dave", token)).Count);
+        Assert.Single(await workflow.SearchSubjectsAsync(job.Id, "dave b", token));
+        Assert.Empty(await workflow.SearchSubjectsAsync("different-job", "dav", token));
+        Assert.True((await workflow.GetSubjectsAsync(group.Id, token))[1].HasPhotos);
+    }
+
 }
+
