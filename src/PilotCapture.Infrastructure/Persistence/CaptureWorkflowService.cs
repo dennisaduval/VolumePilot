@@ -62,7 +62,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
     public async Task<IReadOnlyList<CaptureSubjectChoice>> GetSubjectsAsync(string groupId, CancellationToken cancellationToken = default) =>
         await dbContext.Memberships.AsNoTracking()
             .Where(membership => membership.GroupId == groupId && membership.IsActive && membership.Subject!.IsActive)
-            .OrderBy(membership => membership.Subject!.DisplayName)
+            .OrderBy(membership => EF.Functions.Collate(membership.Subject!.DisplayName, "NOCASE"))
             .ThenBy(membership => membership.Id)
             .Select(membership => new CaptureSubjectChoice(
                 membership.SubjectId,
@@ -71,7 +71,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
                 membership.RosterNumber,
                 membership.Role,
                 dbContext.CaptureImages.Any(image => image.SelectionScopeId == membership.Id),
-                membership.GroupId, membership.Group!.Name))
+                membership.GroupId, membership.Group!.Name, membership.Subject!.IdentityStatus == SubjectIdentityStatus.Unidentified))
             .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<CaptureSubjectChoice>> SearchSubjectsAsync(string eventId, string query, CancellationToken cancellationToken = default)
@@ -79,7 +79,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         var members = await dbContext.Memberships.AsNoTracking()
             .Where(x => x.Subject!.EventId == eventId && x.IsActive && x.Subject.IsActive && x.Group!.IsActive)
             .Select(x => new CaptureSubjectChoice(x.SubjectId, x.Id, x.Subject!.DisplayName, x.RosterNumber, x.Role,
-                dbContext.CaptureImages.Any(i => i.SelectionScopeId == x.Id), x.GroupId, x.Group!.Name))
+                dbContext.CaptureImages.Any(i => i.SelectionScopeId == x.Id), x.GroupId, x.Group!.Name, x.Subject!.IdentityStatus == SubjectIdentityStatus.Unidentified))
             .ToListAsync(cancellationToken);
         var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return members.Where(x => words.All(w => $"{x.DisplayName} {x.RosterNumber} {x.GroupName}".Contains(w, StringComparison.OrdinalIgnoreCase)))
@@ -418,7 +418,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         return new CaptureSetResult(
             nextCaptureSet.Id,
             nextSubject.DisplayName,
-            false,
+            nextSubject.IsUnidentified,
             groupId,
             nextSubject.MembershipId,
             now);

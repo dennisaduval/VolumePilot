@@ -62,4 +62,24 @@ public sealed class RosterImportPreviewTests
         Assert.Equal("Manager", row.ClassOrCategory);
         Assert.True(row.SourceDataJson.Contains(" Alex ", StringComparison.Ordinal));
     }
+    [Fact]
+    public void Spa_fields_preserve_number_position_class_and_all_custom_texts()
+    {
+        const string csv = "NUMBER,FIRSTNAME,LASTNAME,TEAMNAME,POSITION,LEAGUENAME,SCHOOLNAME,CLASS,YEAR,SPATEXT1,SPATEXT2,SPATEXT3,SPATEXT4,SPATEXT5\r\n"
+            + "007,Dave,Smith,Falcons,Pitcher,Junior League,Central,Senior,2026,A,B,C,D,E\r\n";
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(csv));
+        var document = RosterCsvReader.Read(input);
+        var row = Assert.Single(RosterImportPreviewBuilder.Build(document, new RosterColumnMapping(1, 2, 3, null, 0, 7)));
+        var fields = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,string>>(row.SpaDataJson!)!;
+        Assert.Equal("007", fields["NUMBER"]);
+        Assert.Equal("Pitcher", fields["POSITION"]);
+        Assert.Equal("Senior", fields["CLASS"]);
+        Assert.Equal("Central", fields["SCHOOLNAME"]);
+        Assert.Equal("Junior League", fields["LEAGUENAME"]);
+        Assert.Equal("2026", fields["YEAR"]);
+        Assert.Equal("E", fields["SPATEXT5"]);
+        Assert.Equal(document.Rows[0].ToSourceDataJson(), row.SourceDataJson);
+    }
+
 }
+

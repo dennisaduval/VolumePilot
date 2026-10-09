@@ -324,8 +324,11 @@ public sealed partial class MainWindow : Window
 
     private async void OnCaptureEventChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (!_isPopulatingCaptureChoices)
-            await RefreshCaptureGroupsAsync();
+        if (_isPopulatingCaptureChoices) return;
+        await _captureOperationLock.WaitAsync();
+        try { await RefreshCaptureGroupsAsync(); }
+        catch (Exception exception) { ReviewStatus.Text = $"Jobs could not load: {exception.Message}"; }
+        finally { _captureOperationLock.Release(); }
     }
 
     private async void OnExportRosterClick(object? sender, RoutedEventArgs e)
@@ -395,8 +398,11 @@ public sealed partial class MainWindow : Window
 
     private async void OnCaptureGroupChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (!_isPopulatingCaptureChoices)
-            await RefreshCaptureSubjectsAsync();
+        if (_isPopulatingCaptureChoices) return;
+        await _captureOperationLock.WaitAsync();
+        try { await RefreshCaptureSubjectsAsync(); }
+        catch (Exception exception) { ReviewStatus.Text = $"Athletes could not load: {exception.Message}"; }
+        finally { _captureOperationLock.Release(); }
     }
 
     private async void OnStationCodeChanged(object? sender, SelectionChangedEventArgs e)
@@ -703,6 +709,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
+            if (previewVersion != _previewVersion) return;
             SelectedImagePreview.Source = null;
             SelectedImageStatus.Text = $"Preview unavailable: {exception.Message}";
         }
@@ -918,6 +925,8 @@ public sealed partial class MainWindow : Window
         await _captureOperationLock.WaitAsync();
         try
         {
+            // A rapid second selection may have queued while the first was saving.
+            if (_activeCaptureSession?.Id != activeSession.Id || _activeCaptureSession.CurrentCaptureSet?.MembershipId == subject.MembershipId) return;
             var captureSet = await _captureWorkflowService.SelectSubjectAsync(activeSession.Id, subject.MembershipId);
             SelectedCaptureSubject.Text = $"Selected {captureSet.SubjectName}. Ready for this subject's images.";
             _observedSourceVersions.Clear();
@@ -1084,10 +1093,16 @@ public sealed partial class MainWindow : Window
     private async void OnTeamSearchChanged(object? sender, TextChangedEventArgs e)
     {
         if (_isPopulatingCaptureChoices) return;
-        _isPopulatingCaptureChoices = true;
-        SetChoices(CaptureGroupCombo, FilterGroups(), x => x.Name, _activeCaptureSession?.CurrentCaptureSet?.GroupId);
-        _isPopulatingCaptureChoices = false;
-        await RefreshCaptureSubjectsAsync();
+        await _captureOperationLock.WaitAsync();
+        try
+        {
+            _isPopulatingCaptureChoices = true;
+            SetChoices(CaptureGroupCombo, FilterGroups(), x => x.Name, _activeCaptureSession?.CurrentCaptureSet?.GroupId);
+            _isPopulatingCaptureChoices = false;
+            await RefreshCaptureSubjectsAsync();
+        }
+        catch (Exception exception) { ReviewStatus.Text = $"Teams could not load: {exception.Message}"; }
+        finally { _isPopulatingCaptureChoices = false; _captureOperationLock.Release(); }
     }
     private void OnLeagueChanged(object? sender, SelectionChangedEventArgs e) => OnTeamSearchChanged(sender, null!);
     private async void OnAthleteSelectionChanged(object? sender, SelectionChangedEventArgs e)

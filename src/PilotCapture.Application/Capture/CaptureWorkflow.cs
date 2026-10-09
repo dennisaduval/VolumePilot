@@ -4,7 +4,7 @@ namespace PilotCapture.Application.Capture;
 
 public sealed record CaptureEventChoice(string Id, string Name);
 public sealed record CaptureGroupChoice(string Id, string EventId, string Name, string? LeagueName = null);
-public sealed record CaptureSubjectChoice(string SubjectId, string MembershipId, string DisplayName, string? RosterNumber, string? Role, bool HasPhotos = false, string? GroupId = null, string? GroupName = null);
+public sealed record CaptureSubjectChoice(string SubjectId, string MembershipId, string DisplayName, string? RosterNumber, string? Role, bool HasPhotos = false, string? GroupId = null, string? GroupName = null, bool IsUnidentified = false);
 public sealed record CaptureSubjectDetails(string? FirstName, string? LastName, string? RosterNumber, string? Role);
 public sealed record ActiveCaptureSession(string Id, string EventId, string EventName, string PhotographerName, string ProfileName, CaptureWorkflowType WorkflowType, string StationCode, DateTimeOffset StartedAtUtc, CaptureSetResult? CurrentCaptureSet);
 public sealed record CaptureSetResult(string CaptureSetId, string SubjectName, bool IsUnidentified, string? GroupId, string? MembershipId, DateTimeOffset StartedAtUtc);

@@ -13,6 +13,7 @@ public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICapture
         image.SelectionScopeId = set.MembershipId ?? set.SubjectId;
         var images = await dbContext.CaptureImages.Where(x => x.SelectionScopeId == image.SelectionScopeId)
             .OrderBy(x => x.Id).ToListAsync(cancellationToken);
+        images = images.OrderBy(x => x.CapturedAtUtc).ThenBy(x => x.Id).ToList();
         images.Add(image);
         var roles = NormalizeRoles(images);
         // Clear first, then assign: SQLite unique indexes are checked per statement.
@@ -32,6 +33,7 @@ public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICapture
         var image = await dbContext.CaptureImages.SingleAsync(x => x.Id == captureImageId, cancellationToken);
         var images = await dbContext.CaptureImages.Where(x => x.SelectionScopeId == image.SelectionScopeId)
             .OrderBy(x => x.Id).ToListAsync(cancellationToken);
+        images = images.OrderBy(x => x.CapturedAtUtc).ThenBy(x => x.Id).ToList();
         var primary = images.FirstOrDefault(x => x.IsPrimary);
         var secondary = images.FirstOrDefault(x => x.IsSecondary);
         switch (action)

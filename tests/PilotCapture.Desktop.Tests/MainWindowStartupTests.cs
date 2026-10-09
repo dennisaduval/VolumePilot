@@ -31,6 +31,8 @@ public sealed class MainWindowStartupTests
             await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>()
                 .InitializeAsync(TestContext.Current.CancellationToken);
 
+            var portraitBytes = await PortraitImageDecoder.DecodeAsync(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAIAAADwyuo0AAAAEElEQVR4nGMwSJgARwzIHAByGgkBW9L7BQAAAABJRU5ErkJggg=="), 100);
+
             // Keep all UI operations on this thread after initializing the database.
             AppBuilder.Configure<App>()
                 .UseHeadless(new AvaloniaHeadlessPlatformOptions())
@@ -46,6 +48,10 @@ public sealed class MainWindowStartupTests
                 Assert.Equal(2, workflow.Items.Count);
                 Assert.Equal(0, workflow.SelectedIndex);
                 Assert.Equal(4, station.Items.Count);
+                using var portraitStream = new MemoryStream(portraitBytes);
+                using var portraitBitmap = new Avalonia.Media.Imaging.Bitmap(portraitStream);
+                Assert.Equal(2, portraitBitmap.PixelSize.Width);
+                Assert.Equal(4, portraitBitmap.PixelSize.Height);
                 Assert.IsType<Button>(window.FindControl<Button>("SetSecondaryButton"));
                 Assert.IsType<TextBox>(window.FindControl<TextBox>("SubjectSearchBox")).Text = "dav";
                 Assert.IsType<TextBox>(window.FindControl<TextBox>("TeamSearchBox")).Text = "team";

@@ -173,7 +173,7 @@
                       <TextBox x:Name="ManualFirstName" PlaceholderText="First name (optional)" />
                       <TextBox Grid.Column="1" x:Name="ManualLastName" PlaceholderText="Last name (optional)" />
                       <TextBox Grid.Row="1" x:Name="ManualRosterNumber" PlaceholderText="Number (optional)" />
-                      <TextBox Grid.Row="1" Grid.Column="1" x:Name="ManualRole" PlaceholderText="Class / position (optional)" />
+                      <TextBox Grid.Row="1" Grid.Column="1" x:Name="ManualRole" PlaceholderText="Class / category (optional)" />
                     </Grid>
                     <Button x:Name="CreateManualSubjectButton" Content="Add and select subject" IsEnabled="False" Click="OnCreateManualSubjectClick" />
                     <TextBox x:Name="UnidentifiedSubjectName" PlaceholderText="Temporary label, such as Walk-in 1" />
