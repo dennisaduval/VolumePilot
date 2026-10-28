@@ -24,17 +24,17 @@
       <TextBlock Grid.Row="1" Grid.Column="2" x:Name="PhotoCount" FontSize="18" VerticalAlignment="Center" />
     </Grid>
     <Grid Grid.Row="3" ColumnDefinitions="*,*" ColumnSpacing="16">
-      <StackPanel x:Name="CaptureControls" Spacing="10">
+      <Grid x:Name="CaptureControls" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" RowSpacing="10">
         <TextBlock x:Name="CurrentPlayer" FontSize="30" FontWeight="SemiBold" />
-        <Button Classes="forward-action" x:Name="NextPlayerButton" Content="Next Player · release primary" MinHeight="80" FontSize="24" Click="OnNextPlayerClick" />
-        <TextBlock x:Name="PlayerSlots" FontSize="16" TextWrapping="Wrap" />
-        <TextBlock Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
-        <ListBox x:Name="ImagesList" Height="230" SelectionChanged="OnImageChanged" />
-        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+        <Button Grid.Row="1" Classes="forward-action" x:Name="NextPlayerButton" Content="Next Player · release primary" MinHeight="80" FontSize="24" Click="OnNextPlayerClick" />
+        <TextBlock Grid.Row="2" x:Name="PlayerSlots" FontSize="16" TextTrimming="CharacterEllipsis" />
+        <TextBlock Grid.Row="3" Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
+        <ListBox Grid.Row="4" x:Name="ImagesList" SelectionChanged="OnImageChanged" />
+        <Grid Grid.Row="5" ColumnDefinitions="*,*" ColumnSpacing="12">
           <Button x:Name="PrimaryButton" Content="Make Primary" MinHeight="64" FontSize="20" Click="OnPrimaryClick" />
           <Button Grid.Column="1" x:Name="RejectButton" Content="Reject / restore" MinHeight="64" FontSize="20" Click="OnRejectClick" />
         </Grid>
-      </StackPanel>
+      </Grid>
       <Border x:Name="PreviewPanel" Grid.Column="1" Background="#0B1F3A" CornerRadius="8" Padding="10"><Image x:Name="Preview" Stretch="Uniform" /></Border>
     </Grid>
     <Border Grid.Row="4" Background="White" Padding="12"><TextBlock x:Name="Status" Text="Create or resume a job, select a team, then start watching." FontSize="17" TextWrapping="Wrap" /></Border>

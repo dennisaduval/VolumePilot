@@ -26,6 +26,7 @@ public sealed partial class FastCaptureWindow : Window
         ModeTitle.Text = type switch { CaptureJobType.PrintOnSiteTeamsOnly => "Print on site · Team Only", CaptureJobType.ActionPhotography => "Action · automatic image routing", _ => "Print on site · Team and Individuals" };
         NextPlayerButton.IsVisible = CurrentPlayer.IsVisible = PlayerSlots.IsVisible = PrimaryButton.IsVisible = IndividualsSetup.IsVisible = UsesPlayers;
         PreviewPanel.IsVisible = type != CaptureJobType.ActionPhotography;
+        if (!UsesPlayers) { Grid.SetColumn(RejectButton, 0); Grid.SetColumnSpan(RejectButton, 2); }
         if (type == CaptureJobType.ActionPhotography) Grid.SetColumnSpan(CaptureControls, 2);
         _timer.Tick += async (_, _) => { if (!_busy && !_refreshing && _jobId is not null) await RefreshAsync(); };
         Loaded += async (_, _) => { await LoadJobsAsync(); _timer.Start(); };
@@ -65,7 +66,7 @@ public sealed partial class FastCaptureWindow : Window
             _settingChoices = false;
             var team = _snapshot.Teams.FirstOrDefault(x => x.Id == job.CurrentTeamId);
             CurrentPlayer.Text = team is null ? "Select a team" : $"{team.Name} · Player {team.CurrentPlayer}";
-            PlayerSlots.Text = "Used slots: " + string.Join("   ", _snapshot.UsedPlayers.Select(x => $"✓ Player {x}"));
+            PlayerSlots.Text = $"Used slots ({_snapshot.UsedPlayers.Count}): " + string.Join("   ", _snapshot.UsedPlayers.TakeLast(12).Select(x => $"✓{x}"));
             PhotoCount.Text = $"{_snapshot.Images.Count} recent image(s)";
             var signature = string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}"));
             if (_displaySignature != signature)

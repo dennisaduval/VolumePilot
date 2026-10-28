@@ -50,6 +50,20 @@ public sealed class MainWindowStartupTests
                 Assert.False(Assert.IsType<Border>(fast.FindControl<Border>("PreviewPanel")).IsVisible);
                 Assert.False(Assert.IsType<Button>(fast.FindControl<Button>("NextPlayerButton")).IsVisible);
                 fast.Close(); chooser.Close();
+                var portraitFast = new FastCaptureWindow(PilotCapture.Domain.CaptureJobType.PrintOnSiteTeamAndIndividual,
+                    new FastCaptureController(provider.GetRequiredService<IServiceScopeFactory>()));
+                portraitFast.FindControl<Expander>("SetupPanel")!.IsExpanded = false;
+                portraitFast.FindControl<TextBlock>("CurrentPlayer")!.Text = "Falcons · Player 12";
+                portraitFast.FindControl<TextBlock>("PlayerSlots")!.Text = "Used slots (12): ✓1 ✓2 ✓3 ✓4 ✓5 ✓6 ✓7 ✓8 ✓9 ✓10 ✓11 ✓12";
+                var surface = Assert.IsType<Grid>(portraitFast.Content);
+                surface.Measure(new Size(1000, 760));
+                surface.Arrange(new Rect(0, 0, 1000, 760));
+                var reject = portraitFast.FindControl<Button>("RejectButton")!;
+                var position = reject.TranslatePoint(new Point(0, 0), surface);
+                Assert.True(position.HasValue);
+                Assert.True(position.Value.Y + reject.Bounds.Height <= surface.Bounds.Height, "Reject must remain within the capture surface at minimum window size.");
+                Assert.True(reject.Bounds.Height >= 64);
+                portraitFast.Close();
                 var workflow = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("WorkflowTypeCombo"));
                 var station = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("StationCodeCombo"));
                 Assert.Equal(2, workflow.Items.Count);
