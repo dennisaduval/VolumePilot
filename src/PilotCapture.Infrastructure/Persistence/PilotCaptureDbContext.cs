@@ -21,6 +21,10 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
     public DbSet<RosterImportRow> RosterImportRows => Set<RosterImportRow>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
+    public DbSet<FastCaptureJob> FastJobs => Set<FastCaptureJob>();
+    public DbSet<FastCaptureTeam> FastTeams => Set<FastCaptureTeam>();
+    public DbSet<FastCaptureImage> FastImages => Set<FastCaptureImage>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Event>(entity =>
@@ -198,6 +202,24 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
             entity.HasOne<LocalInstallation>().WithMany().HasForeignKey(x => x.InstallationId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<FastCaptureJob>(e => { e.ToTable("fast_capture_jobs"); e.HasKey(x => x.Id); });
+        modelBuilder.Entity<FastCaptureTeam>(e =>
+        {
+            e.ToTable("fast_capture_teams"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).UseCollation("NOCASE"); e.Property(x => x.FolderName).UseCollation("NOCASE");
+            e.HasIndex(x => new { x.JobId, x.Name }).IsUnique();
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<FastCaptureImage>(e =>
+        {
+            e.ToTable("fast_capture_images"); e.HasKey(x => x.Id);
+            e.Property(x => x.SourcePath).UseCollation("NOCASE");
+            e.HasIndex(x => new { x.JobId, x.SourcePath, x.SourceTicks, x.SourceLength }).IsUnique();
+            e.HasIndex(x => new { x.TeamId, x.PlayerNumber }).IsUnique().HasFilter("is_primary = 1");
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<FastCaptureTeam>().WithMany().HasForeignKey(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(x => x.GetProperties()))
             property.SetColumnName(ToSnakeCase(property.Name));
     }
@@ -215,4 +237,5 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
         return result.ToString();
     }
 }
+
 

@@ -82,3 +82,7 @@ The importer recognizes these headers ignoring spacing/punctuation/case, plus CL
 9. Check multiple photos, duplicate names, reserved/invalid filename characters, missing derivatives and changed PNGs.
 
 This preview does not implement a Windows installer, background station synchronization, automated image extraction/editing, or print fulfillment. Verify background master-copy throughput on the actual server connection before production use. Closing the application may interrupt publication; originals remain local and Publish originals / retry completes missing copies on the next run.
+
+## Revised job split, 28 October 2026
+
+The [immediate-output job specification](immediate-output-jobs.md) supersedes this document for print-on-site and Action jobs. Their speed, player-slot, primary-release and output-folder rules are distinct. This older roster-driven workspace is retained separately; the future Leagues and Schools and Individual Teams screens are not finalized.

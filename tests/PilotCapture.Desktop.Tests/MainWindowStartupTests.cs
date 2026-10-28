@@ -43,6 +43,13 @@ public sealed class MainWindowStartupTests
             var window = scope.ServiceProvider.GetRequiredService<MainWindow>();
             try
             {
+                var chooser = new JobChooserWindow();
+                Assert.Equal("VolumePilot | Pilot Capture", chooser.Title);
+                var fast = new FastCaptureWindow(PilotCapture.Domain.CaptureJobType.ActionPhotography,
+                    new FastCaptureController(provider.GetRequiredService<IServiceScopeFactory>()));
+                Assert.False(Assert.IsType<Border>(fast.FindControl<Border>("PreviewPanel")).IsVisible);
+                Assert.False(Assert.IsType<Button>(fast.FindControl<Button>("NextPlayerButton")).IsVisible);
+                fast.Close(); chooser.Close();
                 var workflow = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("WorkflowTypeCombo"));
                 var station = Assert.IsType<ComboBox>(window.FindControl<ComboBox>("StationCodeCombo"));
                 Assert.Equal(2, workflow.Items.Count);

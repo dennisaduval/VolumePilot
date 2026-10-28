@@ -134,3 +134,7 @@ Requires the .NET 10 SDK. From the repository root, restore and build with `dotn
 ## Team and Individual capture extension
 
 The current requirements and behavior are defined in [Team and Individual Photoday](team-individual.md). This extends First Flight with Secondary, one Banner per athlete/team, toggle rejection, repeat-visit history, photographed indicators, touch filmstrip, searchable selections, master-folder publication, edited PNG association, and folder/SPA exports. These rules supersede earlier per-visit Primary/Banner-only descriptions above. Other job models retain separate future capture/processing requirements.
+
+## Immediate-output modes, 28 October 2026
+
+The [five-job chooser and immediate-output requirements](immediate-output-jobs.md) define the current startup and the three active fast workflows. Team Only, Team and Individuals, and Action bypass the roster/face-analysis path. Leagues and Schools and Individual Teams are future screens. The earlier roster workspace remains a compatibility option.

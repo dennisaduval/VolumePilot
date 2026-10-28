@@ -35,3 +35,19 @@ class TeamIndividualMigrationTests(unittest.TestCase):
         self.assertEqual([], db.execute('PRAGMA foreign_key_check').fetchall())
         self.assertIn('master_media_path', {r[1] for r in db.execute('PRAGMA table_info(local_installation)')})
         db.close()
+
+class FastCaptureMigrationTests(unittest.TestCase):
+    def test_fast_jobs_upgrade_and_unique_delivery_records(self):
+        db = sqlite3.connect(':memory:')
+        db.execute('PRAGMA foreign_keys=ON')
+        for path in sorted(MIGRATIONS.glob('*.sql')):
+            db.executescript(path.read_text())
+        db.execute("INSERT INTO fast_capture_jobs VALUES ('job','Test',2,'source','output','individuals',NULL,0)")
+        db.execute("INSERT INTO fast_capture_teams VALUES ('team','job','Falcons','Falcons',1)")
+        row = ('image','job','team',1,1,'source.jpg',1,4,'local.jpg','hash',1,0,0,1,None)
+        db.execute('INSERT INTO fast_capture_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',row)
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute('INSERT INTO fast_capture_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',('other',)+row[1:])
+        self.assertEqual([],db.execute('PRAGMA foreign_key_check').fetchall())
+        self.assertEqual(1,db.execute('SELECT current_player FROM fast_capture_teams').fetchone()[0])
+        db.close()
