@@ -42,8 +42,8 @@ class FastCaptureMigrationTests(unittest.TestCase):
         db.execute('PRAGMA foreign_keys=ON')
         for path in sorted(MIGRATIONS.glob('*.sql')):
             db.executescript(path.read_text())
-        db.execute("INSERT INTO fast_capture_jobs VALUES ('job','Test',2,'source','output','individuals',NULL,0)")
-        db.execute("INSERT INTO fast_capture_teams VALUES ('team','job','Falcons','Falcons',1)")
+        db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,individuals_folder,current_team_id,started_at_ticks) VALUES ('job','Test',2,'source','output','individuals',NULL,0)")
+        db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player) VALUES ('team','job','Falcons','Falcons',1)")
         row = ('image','job','team',1,1,'source.jpg',1,4,'local.jpg','hash',1,0,0,1,None)
         db.execute('INSERT INTO fast_capture_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',row)
         with self.assertRaises(sqlite3.IntegrityError):

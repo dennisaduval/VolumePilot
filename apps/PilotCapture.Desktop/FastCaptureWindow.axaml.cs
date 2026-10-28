@@ -5,6 +5,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using PilotCapture.Application.FastCapture;
 using PilotCapture.Domain;
+using PilotCapture.Application.Rosters;
 using PilotCapture.Infrastructure.Persistence;
 namespace PilotCapture.Desktop;
 
@@ -18,16 +19,21 @@ public sealed partial class FastCaptureWindow : Window
     private bool _busy, _refreshing, _settingChoices, _closed;
     private string? _jobId, _displayedImageId, _displaySignature, _actionError;
     private Bitmap? _bitmap;
+    private string? _slotSignature;
+    private byte[]? _rosterBytes;
+    private RosterCsvDocument? _rosterDocument;
+    private string _rosterName = "";
     public event Action? ReturnRequested;
     private bool UsesPlayers => _type == CaptureJobType.PrintOnSiteTeamAndIndividual;
     public FastCaptureWindow(CaptureJobType type, FastCaptureController controller)
     {
         _type = type; _controller = controller; InitializeComponent();
         ModeTitle.Text = type switch { CaptureJobType.PrintOnSiteTeamsOnly => "Print on site · Team Only", CaptureJobType.ActionPhotography => "Action · automatic image routing", _ => "Print on site · Team and Individuals" };
-        NextPlayerButton.IsVisible = CurrentPlayer.IsVisible = PlayerSlots.IsVisible = PrimaryButton.IsVisible = IndividualsSetup.IsVisible = UsesPlayers;
+        PlayerPanel.IsVisible = PrimaryButton.IsVisible = IndividualsSetup.IsVisible = UsesPlayers;
         PreviewPanel.IsVisible = type != CaptureJobType.ActionPhotography;
         if (!UsesPlayers) { Grid.SetColumn(RejectButton, 0); Grid.SetColumnSpan(RejectButton, 2); }
-        if (type == CaptureJobType.ActionPhotography) Grid.SetColumnSpan(CaptureControls, 2);
+        if (!UsesPlayers) { Grid.SetColumn(CaptureControls, 0); Grid.SetColumnSpan(CaptureControls, 2); }
+        if (type == CaptureJobType.ActionPhotography) Grid.SetColumnSpan(CaptureControls, 3);
         _timer.Tick += async (_, _) => { if (!_busy && !_refreshing && _jobId is not null) await RefreshAsync(); };
         Loaded += async (_, _) => { await LoadJobsAsync(); _timer.Start(); };
         Closed += (_, _) => { _closed = true; _timer.Stop(); _controller.Dispose(); _bitmap?.Dispose(); };
@@ -59,14 +65,15 @@ public sealed partial class FastCaptureWindow : Window
             var job = _snapshot.Job;
             JobName.Text = job.Name; SourcePath.Text = job.SourceFolder; OutputPath.Text = job.OutputFolder; IndividualsPath.Text = job.IndividualsFolder;
             _settingChoices = true;
-            var teamsSignature = string.Join('|', _snapshot.Teams.Select(t => t.Id));
+            var teamsSignature = string.Join('|', _snapshot.Teams.Select(t => $"{t.Id}:{t.SortOrder}:{t.PerformanceLabel}"));
             if (Teams.Tag as string != teamsSignature)
-            { Teams.ItemsSource = _snapshot.Teams.Select(t => t.Name).ToArray(); Teams.Tag = teamsSignature; }
+            { Teams.ItemsSource = _snapshot.Teams.Select(FormatPerformance).ToArray(); Teams.Tag = teamsSignature; }
             Teams.SelectedIndex = _snapshot.Teams.ToList().FindIndex(x => x.Id == job.CurrentTeamId);
             _settingChoices = false;
             var team = _snapshot.Teams.FirstOrDefault(x => x.Id == job.CurrentTeamId);
-            CurrentPlayer.Text = team is null ? "Select a team" : $"{team.Name} · Player {team.CurrentPlayer}";
-            PlayerSlots.Text = $"Used slots ({_snapshot.UsedPlayers.Count}): " + string.Join("   ", _snapshot.UsedPlayers.TakeLast(12).Select(x => $"✓{x}"));
+            PlayerTeamName.Text = team?.Name ?? "Select a team";
+            CurrentPlayer.Text = team is null ? "" : $"Player {team.CurrentPlayer}";
+            RenderPlayerSlots(team);
             PhotoCount.Text = $"{_snapshot.Images.Count} recent image(s)";
             var signature = string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}"));
             if (_displaySignature != signature)
@@ -97,6 +104,9 @@ public sealed partial class FastCaptureWindow : Window
         RejectButton.IsEnabled = !_busy && SelectedImage() is not null;
         RejectButton.Content = SelectedImage()?.IsRejected == true ? "Restore image" : "Reject image";
         SaveJobButton.IsEnabled = !_busy && _jobId is null;
+        ImportRosterButton.IsEnabled = !_busy && _jobId is not null;
+        NextPerformanceButton.IsEnabled = !_busy && _snapshot is { Teams.Count: > 0 };
+        PlayerSlots.IsEnabled = !_busy;
     }
     private async Task ShowPreviewAsync()
     {
@@ -112,9 +122,12 @@ public sealed partial class FastCaptureWindow : Window
         _bitmap = Bitmap.DecodeToHeight(source, 700);
         Preview.Source = _bitmap;
     }
-    private async void OnCreateJobClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
+    private async void OnCreateJobClick(object? sender, RoutedEventArgs e) => await CreateConfiguredJobAsync();
+    public Task CreateConfiguredJobAsync() => RunAsync(async () =>
     {
-        _jobId = await _controller.ExecuteAsync(s => s.CreateJobAsync(new(_type, JobName.Text ?? "", SourcePath.Text ?? "", OutputPath.Text ?? "", IndividualsPath.Text)));
+        Dispatcher.UIThread.VerifyAccess();
+        var settings = new FastJobSettings(_type, JobName.Text ?? "", SourcePath.Text ?? "", OutputPath.Text ?? "", IndividualsPath.Text);
+        _jobId = await _controller.ExecuteAsync(s => s.CreateJobAsync(settings));
         SetupPanel.IsExpanded = false;
     });
     private async void OnSavedJobChanged(object? sender, SelectionChangedEventArgs e)
@@ -127,15 +140,27 @@ public sealed partial class FastCaptureWindow : Window
         await _controller.StopAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
         Preview.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
-        CurrentPlayer.Text = PlayerSlots.Text = PhotoCount.Text = "";
+        CurrentPlayer.Text = PhotoCount.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; RosterMappingPanel.IsVisible = false;
     });
     private async void OnSwitchTeamClick(object? sender, RoutedEventArgs e) => await SwitchTeamAsync(TeamName.Text ?? "");
     private async void OnTeamChanged(object? sender, SelectionChangedEventArgs e)
-    { if (!_settingChoices && _snapshot is not null && Teams.SelectedIndex >= 0) await SwitchTeamAsync(_snapshot.Teams[Teams.SelectedIndex].Name); }
+    {
+        if (_settingChoices || _snapshot is null || Teams.SelectedIndex < 0) return;
+        var jobId = _snapshot.Job.Id; var teamId = _snapshot.Teams[Teams.SelectedIndex].Id;
+        await RunAsync(() => _controller.ExecuteAsync(s => s.SelectPerformanceAsync(jobId, teamId)));
+    }
     private async Task SwitchTeamAsync(string name) => await RunAsync(async () =>
     { if (_jobId is not null) await _controller.ExecuteAsync(s => s.SelectTeamAsync(_jobId, name)); });
     private async void OnMonitorClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
-    { if (_controller.IsRunning) await _controller.StopAsync(); else if (_snapshot is not null) await _controller.StartAsync(_snapshot.Job.Id, _snapshot.Job.SourceFolder); });
+    {
+        if (_controller.IsRunning) await _controller.StopAsync();
+        else if (_snapshot is { } snapshot)
+        {
+            var includeExisting = IncludeExistingPhotos.IsChecked == true;
+            if (includeExisting) await _controller.ExecuteAsync(s => s.IncludeExistingAsync(snapshot.Job.Id));
+            await _controller.StartAsync(snapshot.Job.Id, snapshot.Job.SourceFolder);
+        }
+    });
     private async void OnNextPlayerClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     { if (_jobId is not null) await _controller.ExecuteAsync(s => s.NextPlayerAsync(_jobId)); });
     private async void OnPrimaryClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
@@ -154,4 +179,80 @@ public sealed partial class FastCaptureWindow : Window
     private async void OnSourceFolderClick(object? sender, RoutedEventArgs e) => await PickAsync(SourcePath);
     private async void OnOutputFolderClick(object? sender, RoutedEventArgs e) => await PickAsync(OutputPath);
     private async void OnIndividualsFolderClick(object? sender, RoutedEventArgs e) => await PickAsync(IndividualsPath);
+    private static string FormatPerformance(FastCaptureTeam team) => $"{team.SortOrder}. {team.Name}" + (team.PerformanceLabel.Length > 0 ? $" · {team.PerformanceLabel}" : "");
+    private void RenderPlayerSlots(FastCaptureTeam? team)
+    {
+        if (!UsesPlayers || _snapshot is null) return;
+        var signature = team?.Id + ":" + team?.CurrentPlayer + ":" + string.Join(',', _snapshot.UsedPlayers);
+        if (_slotSignature == signature) return;
+        _slotSignature = signature; PlayerSlots.Children.Clear();
+        if (team is null) return;
+        var maximum = Math.Max(40, Math.Max(team.CurrentPlayer, _snapshot.UsedPlayers.DefaultIfEmpty(0).Max()));
+        maximum = ((maximum + 9) / 10) * 10;
+        for (var n = 1; n <= maximum; n++)
+        {
+            var used = _snapshot.UsedPlayers.Contains(n); var current = team.CurrentPlayer == n;
+            var button = new Button { Tag = n, Content = $"{(used ? "✓ " : "")}Player {n}", Width = 84, MinHeight = 48,
+                IsEnabled = !used || current, FontWeight = current ? Avalonia.Media.FontWeight.Bold : Avalonia.Media.FontWeight.Normal };
+            if (current) { button.Background = Avalonia.Media.Brushes.DarkBlue; button.Foreground = Avalonia.Media.Brushes.White; }
+            button.Click += OnPlayerSlotClick; PlayerSlots.Children.Add(button);
+        }
+    }
+    private async void OnPlayerSlotClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: int number } || _jobId is not { } jobId) return;
+        await RunAsync(() => _controller.ExecuteAsync(s => s.SelectPlayerAsync(jobId, number)));
+    }
+    private async void OnNextPerformanceClick(object? sender, RoutedEventArgs e)
+    {
+        if (_snapshot is not { } snapshot) return;
+        var index = snapshot.Teams.ToList().FindIndex(t => t.Id == snapshot.Job.CurrentTeamId);
+        if (index + 1 >= snapshot.Teams.Count) { _actionError = "This is the last performance in the imported order."; Status.Text = _actionError; return; }
+        var next = snapshot.Teams[index + 1].Id;
+        await RunAsync(() => _controller.ExecuteAsync(s => s.SelectPerformanceAsync(snapshot.Job.Id, next)));
+    }
+    private async void OnImportRosterClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (_jobId is null) throw new InvalidOperationException("Create or resume a job before importing its roster.");
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        { Title = "Choose roster / performance order CSV", AllowMultiple = false, FileTypeFilter = [new FilePickerFileType("CSV") { Patterns = ["*.csv"] }] });
+        if (files.Count == 0) return;
+        _rosterName = files[0].Name;
+        await using var input = await files[0].OpenReadAsync(); using var buffer = new MemoryStream();
+        await input.CopyToAsync(buffer); _rosterBytes = buffer.ToArray();
+        using var source = new MemoryStream(_rosterBytes); _rosterDocument = RosterCsvReader.Read(source);
+        SetColumnOptions(RosterTeamColumn, _rosterDocument.Headers, ["TEAMNAME", "TEAMSCHOOL", "TEAM", "PERFORMER", "SCHOOLNAME", "NAME"], true);
+        SetColumnOptions(RosterGroupColumn, _rosterDocument.Headers, ["SPORT", "DIVISION", "GROUP", "CATEGORY"], false);
+        if ((RosterTeamColumn.SelectedItem as ComboBoxItem)?.Tag is int selectedTeam &&
+            (RosterGroupColumn.SelectedItem as ComboBoxItem)?.Tag is int selectedGroup && selectedTeam == selectedGroup)
+            RosterGroupColumn.SelectedIndex = 0;
+        SetColumnOptions(RosterOrderColumn, _rosterDocument.Headers, ["PERFORMANCEORDER", "RUNORDER", "ORDER", "PERFORMANCENUMBER"], false);
+        RosterFileSummary.Text = $"{_rosterName} · {_rosterDocument.Rows.Count} rows. Confirm the columns below.";
+        RosterMappingPanel.IsVisible = true;
+    });
+    private async void OnConfirmRosterClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (_jobId is not { } jobId || _rosterBytes is null) return;
+        var teamColumn = (RosterTeamColumn.SelectedItem as ComboBoxItem)?.Tag as int? ?? throw new ArgumentException("Choose a team / performer column.");
+        var command = new FastRosterImportCommand(jobId, _rosterName, _rosterBytes, teamColumn,
+            (RosterGroupColumn.SelectedItem as ComboBoxItem)?.Tag as int?, (RosterOrderColumn.SelectedItem as ComboBoxItem)?.Tag as int?);
+        await ImportRosterCoreAsync(command);
+    });
+    public Task ImportConfiguredRosterAsync(FastRosterImportCommand command) => RunAsync(() => ImportRosterCoreAsync(command));
+    private async Task ImportRosterCoreAsync(FastRosterImportCommand command)
+    {
+        var result = await _controller.ExecuteAsync(s => s.ImportRosterAsync(command));
+        RosterMappingPanel.IsVisible = false;
+        _actionError = $"Imported {result.Teams} teams / performances from {result.Rows} source rows.";
+    }
+    private static void SetColumnOptions(ComboBox box, IReadOnlyList<string> headers, string[] aliases, bool required)
+    {
+        box.Items.Clear(); if (!required) box.Items.Add(new ComboBoxItem { Content = "(not mapped)" });
+        foreach (var item in headers.Select((text, index) => (text, index)).OrderBy(x => x.text, StringComparer.OrdinalIgnoreCase))
+            box.Items.Add(new ComboBoxItem { Content = $"{item.text} [{item.index}]", Tag = item.index });
+        var suggested = headers.Select((h, i) => (h, i)).FirstOrDefault(x => aliases.Contains(string.Concat(x.h.Where(char.IsLetterOrDigit)).ToUpperInvariant()));
+        box.SelectedItem = box.Items.OfType<ComboBoxItem>().FirstOrDefault(x => x.Tag is int i && suggested.h is not null && i == suggested.i)
+            ?? (required ? null : box.Items[0]);
+    }
+
 }

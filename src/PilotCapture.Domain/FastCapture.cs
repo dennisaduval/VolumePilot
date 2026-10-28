@@ -10,6 +10,7 @@ public sealed class FastCaptureJob
     public string? IndividualsFolder { get; set; }
     public string? CurrentTeamId { get; set; }
     public long StartedAtTicks { get; set; }
+    public string? IgnoredSourceVersionsJson { get; set; }
 }
 public sealed class FastCaptureTeam
 {
@@ -18,6 +19,9 @@ public sealed class FastCaptureTeam
     public string Name { get; set; } = "";
     public string FolderName { get; set; } = "";
     public int CurrentPlayer { get; set; } = 1;
+    public int SortOrder { get; set; }
+    public string PerformanceKey { get; set; } = "";
+    public string PerformanceLabel { get; set; } = "";
 }
 public sealed class FastCaptureImage
 {
@@ -36,4 +40,14 @@ public sealed class FastCaptureImage
     public bool Released { get; set; }
     public bool NeedsDelivery { get; set; } = true;
     public string? DeliveredPath { get; set; }
+}
+
+public sealed class FastCaptureRosterImport
+{
+    public string Id { get; set; } = Ids.New();
+    public string JobId { get; set; } = "";
+    public string SourceName { get; set; } = "";
+    public string Sha256 { get; set; } = "";
+    public string SourceDataJson { get; set; } = "";
+    public string MappingJson { get; set; } = "";
 }

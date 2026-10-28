@@ -2,40 +2,59 @@
         x:Class="PilotCapture.Desktop.FastCaptureWindow" Title="VolumePilot | Pilot Capture"
         Width="1280" Height="900" MinWidth="1000" MinHeight="760" Background="#F5F7FA" FontFamily="Segoe UI">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12" Margin="24">
-    <Grid ColumnDefinitions="*,Auto">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
       <StackPanel Spacing="4"><TextBlock Text="PILOT CAPTURE" FontSize="14" Foreground="#175CD3" /><TextBlock x:Name="ModeTitle" FontSize="28" FontWeight="SemiBold" /></StackPanel>
-      <Button Grid.Column="1" Content="Choose another job type" Click="OnReturnClick" />
+      <Button Grid.Column="1" x:Name="ImportRosterButton" Content="Import roster / performance order…" Click="OnImportRosterClick" />
+      <Button Grid.Column="2" Content="Choose another job type" Click="OnReturnClick" />
     </Grid>
-    <Expander x:Name="SetupPanel" Grid.Row="1" Header="Job and folder setup" IsExpanded="True">
+    <StackPanel Grid.Row="1" Spacing="8">
+    <Expander x:Name="SetupPanel" Header="Job and folder setup" IsExpanded="True">
       <StackPanel Spacing="8" Margin="0,8">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><ComboBox x:Name="SavedJobs" PlaceholderText="Resume a saved job" SelectionChanged="OnSavedJobChanged" /><Button Grid.Column="1" Content="New job" Click="OnNewJobClick" /></Grid>
         <TextBox x:Name="JobName" PlaceholderText="Job name" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="SourcePath" IsReadOnly="True" PlaceholderText="Incoming Smart Shooter hot folder" /><Button Grid.Column="1" Content="Choose hot folder…" Click="OnSourceFolderClick" /></Grid>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="OutputPath" IsReadOnly="True" PlaceholderText="Watched team output folder" /><Button Grid.Column="1" Content="Choose team output…" Click="OnOutputFolderClick" /></Grid>
         <Grid x:Name="IndividualsSetup" ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="IndividualsPath" IsReadOnly="True" PlaceholderText="Separate individual images output folder" /><Button Grid.Column="1" Content="Choose individual output…" Click="OnIndividualsFolderClick" /></Grid>
+        <CheckBox x:Name="IncludeExistingPhotos" Content="Also process JPEGs already in the hot folder when starting" />
         <Button Classes="primary-action" x:Name="SaveJobButton" Content="Create job" Click="OnCreateJobClick" />
       </StackPanel>
     </Expander>
+    <Border x:Name="RosterMappingPanel" IsVisible="False" Background="White" Padding="12">
+      <StackPanel Spacing="8">
+        <TextBlock x:Name="RosterFileSummary" FontWeight="SemiBold" />
+        <Grid ColumnDefinitions="*,*,*,Auto" ColumnSpacing="10">
+          <StackPanel><TextBlock Text="Team / performer column" /><ComboBox x:Name="RosterTeamColumn" /></StackPanel>
+          <StackPanel Grid.Column="1"><TextBlock Text="Sport / division (optional)" /><ComboBox x:Name="RosterGroupColumn" /></StackPanel>
+          <StackPanel Grid.Column="2"><TextBlock Text="Performance order (optional)" /><ComboBox x:Name="RosterOrderColumn" /></StackPanel>
+          <Button Grid.Column="3" Content="Import into this job" Click="OnConfirmRosterClick" VerticalAlignment="Bottom" />
+        </Grid>
+        <TextBlock Text="Without an order column, teams follow their first appearance in the CSV. Original rows and fields are preserved." TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+    </StackPanel>
     <Grid Grid.Row="2" ColumnDefinitions="2*,2*,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto" RowSpacing="8">
       <TextBox x:Name="TeamName" PlaceholderText="Enter team name" FontSize="22" />
       <Button Grid.Column="1" Content="Add / switch team" Click="OnSwitchTeamClick" FontSize="20" />
       <Button Grid.Column="2" Classes="primary-action" x:Name="MonitorButton" Content="Start watching" Click="OnMonitorClick" FontSize="20" />
       <ComboBox Grid.Row="1" Grid.ColumnSpan="2" x:Name="Teams" SelectionChanged="OnTeamChanged" FontSize="20" />
-      <TextBlock Grid.Row="1" Grid.Column="2" x:Name="PhotoCount" FontSize="18" VerticalAlignment="Center" />
+      <StackPanel Grid.Row="1" Grid.Column="2"><Button x:Name="NextPerformanceButton" Content="Next team / performance" Click="OnNextPerformanceClick" /><TextBlock x:Name="PhotoCount" FontSize="14" /></StackPanel>
     </Grid>
-    <Grid Grid.Row="3" ColumnDefinitions="*,*" ColumnSpacing="16">
-      <Grid x:Name="CaptureControls" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" RowSpacing="10">
-        <TextBlock x:Name="CurrentPlayer" FontSize="30" FontWeight="SemiBold" />
-        <Button Grid.Row="1" Classes="forward-action" x:Name="NextPlayerButton" Content="Next Player · release primary" MinHeight="80" FontSize="24" Click="OnNextPlayerClick" />
-        <TextBlock Grid.Row="2" x:Name="PlayerSlots" FontSize="16" TextTrimming="CharacterEllipsis" />
-        <TextBlock Grid.Row="3" Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
-        <ListBox Grid.Row="4" x:Name="ImagesList" SelectionChanged="OnImageChanged" />
-        <Grid Grid.Row="5" ColumnDefinitions="*,*" ColumnSpacing="12">
+    <Grid Grid.Row="3" ColumnDefinitions="300,*,*" ColumnSpacing="16">
+      <Grid x:Name="PlayerPanel" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="8">
+        <TextBlock x:Name="PlayerTeamName" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <TextBlock Grid.Row="1" x:Name="CurrentPlayer" FontSize="24" FontWeight="SemiBold" />
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"><WrapPanel x:Name="PlayerSlots" ItemWidth="88" ItemHeight="52" /></ScrollViewer>
+        <Button Grid.Row="3" Classes="forward-action" x:Name="NextPlayerButton" Content="Next Player" MinHeight="72" FontSize="22" Click="OnNextPlayerClick" />
+      </Grid>
+      <Grid x:Name="CaptureControls" Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="10">
+        <TextBlock Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
+        <ListBox Grid.Row="1" x:Name="ImagesList" SelectionChanged="OnImageChanged" />
+        <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="12">
           <Button x:Name="PrimaryButton" Content="Make Primary" MinHeight="64" FontSize="20" Click="OnPrimaryClick" />
           <Button Grid.Column="1" x:Name="RejectButton" Content="Reject / restore" MinHeight="64" FontSize="20" Click="OnRejectClick" />
         </Grid>
       </Grid>
-      <Border x:Name="PreviewPanel" Grid.Column="1" Background="#0B1F3A" CornerRadius="8" Padding="10"><Image x:Name="Preview" Stretch="Uniform" /></Border>
+      <Border x:Name="PreviewPanel" Grid.Column="2" Background="#0B1F3A" CornerRadius="8" Padding="10"><Image x:Name="Preview" Stretch="Uniform" /></Border>
     </Grid>
     <Border Grid.Row="4" Background="White" Padding="12"><TextBlock x:Name="Status" Text="Create or resume a job, select a team, then start watching." FontSize="17" TextWrapping="Wrap" /></Border>
   </Grid>

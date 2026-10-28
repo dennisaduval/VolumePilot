@@ -23,6 +23,7 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
 
     public DbSet<FastCaptureJob> FastJobs => Set<FastCaptureJob>();
     public DbSet<FastCaptureTeam> FastTeams => Set<FastCaptureTeam>();
+    public DbSet<FastCaptureRosterImport> FastRosterImports => Set<FastCaptureRosterImport>();
     public DbSet<FastCaptureImage> FastImages => Set<FastCaptureImage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -207,7 +208,12 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
         {
             e.ToTable("fast_capture_teams"); e.HasKey(x => x.Id);
             e.Property(x => x.Name).UseCollation("NOCASE"); e.Property(x => x.FolderName).UseCollation("NOCASE");
-            e.HasIndex(x => new { x.JobId, x.Name }).IsUnique();
+            e.HasIndex(x => new { x.JobId, x.Name, x.PerformanceKey }).IsUnique();
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<FastCaptureRosterImport>(e =>
+        {
+            e.ToTable("fast_capture_roster_imports"); e.HasKey(x => x.Id);
             e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<FastCaptureImage>(e =>

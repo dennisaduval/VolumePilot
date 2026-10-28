@@ -81,6 +81,60 @@ public sealed class FastCaptureServiceTests
         await Assert.ThrowsAsync<ArgumentException>(() => env.Service.CreateJobAsync(new(CaptureJobType.ActionPhotography,
             "Bad", Path.Combine(env.Root, "incoming"), Path.Combine(env.Root, "incoming"), null), env.Token));
     }
+    [Theory]
+    [InlineData(CaptureJobType.PrintOnSiteTeamsOnly)]
+    [InlineData(CaptureJobType.PrintOnSiteTeamAndIndividual)]
+    [InlineData(CaptureJobType.ActionPhotography)]
+    public async Task Every_mode_imports_and_preserves_rosters_and_numeric_performance_order(CaptureJobType type)
+    {
+        await using var env = await Environment.CreateAsync(type);
+        var csv = System.Text.Encoding.UTF8.GetBytes("TEAMNAME,ORDER,FIRSTNAME,EXTRA\r\nFalcons,10,Dave,keep this\r\nBears,2,Jane,raw text\r\nFalcons,10,Sam,duplicate team row\r\nFalcons,20,Pat,later performance\r\n");
+        var command = new FastRosterImportCommand(env.JobId, "schedule.csv", csv, 0, null, 1);
+        var result = await env.Service.ImportRosterAsync(command, env.Token);
+        Assert.Equal(3, result.Teams); Assert.Equal(4, result.Rows);
+        var snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        Assert.Equal(new[] { "Bears", "Falcons", "Falcons" }, snapshot.Teams.Take(3).Select(x => x.Name));
+        Assert.Equal(new[] { "2", "10", "20" }, snapshot.Teams.Take(3).Select(x => x.PerformanceLabel));
+        var ids = snapshot.Teams.Select(x => x.Id).ToArray();
+        await env.Service.ImportRosterAsync(command, env.Token);
+        Assert.Equal(ids, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Select(x => x.Id));
+        var import = await env.Db.FastRosterImports.FirstAsync(env.Token);
+        Assert.Contains("duplicate team row", import.SourceDataJson);
+        Assert.Contains("EXTRA", import.SourceDataJson);
+        await env.Service.SelectPerformanceAsync(env.JobId, snapshot.Teams[2].Id, env.Token);
+        Assert.Equal(snapshot.Teams[2].Id, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Job.CurrentTeamId);
+    }
+
+    [Fact]
+    public async Task Explicit_unused_slots_are_selectable_but_used_slots_cannot_be_reused()
+    {
+        await using var env = await Environment.CreateAsync(CaptureJobType.PrintOnSiteTeamAndIndividual);
+        await env.Service.SelectPlayerAsync(env.JobId, 8, env.Token);
+        Assert.Empty(Directory.GetDirectories(Path.Combine(env.Root, "individuals")));
+        await env.ShootAsync("player8.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        await env.Service.SelectPlayerAsync(env.JobId, 3, env.Token);
+        var snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        Assert.Equal(3, snapshot.Teams.Single().CurrentPlayer);
+        Assert.Contains(8, snapshot.UsedPlayers);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => env.Service.SelectPlayerAsync(env.JobId, 8, env.Token));
+        Assert.True(File.Exists(snapshot.Images.Single().DeliveredPath));
+    }
+
+    [Fact]
+    public async Task Arrival_is_detected_even_with_an_old_camera_timestamp_and_existing_files_are_explicit()
+    {
+        await using var env = await Environment.CreateAsync(CaptureJobType.ActionPhotography);
+        await env.ShootAsync("existing.jpg"); File.SetLastWriteTimeUtc(Path.Combine(env.Root, "incoming", "existing.jpg"), DateTime.UtcNow.AddYears(-2));
+        var job = await env.Service.CreateJobAsync(new(CaptureJobType.ActionPhotography, "Copied photos", Path.Combine(env.Root, "incoming"), Path.Combine(env.Root, "teams"), null), env.Token);
+        await env.Service.SelectTeamAsync(job, "Copied team", env.Token);
+        await env.ShootAsync("new-arrival.jpg"); File.SetLastWriteTimeUtc(Path.Combine(env.Root, "incoming", "new-arrival.jpg"), DateTime.UtcNow.AddYears(-1));
+        await env.Service.ScanAsync(job, env.Token);
+        Assert.Equal("new-arrival.jpg", Path.GetFileName(Assert.Single((await env.Service.GetSnapshotAsync(job, env.Token)).Images).SourcePath));
+        await env.Service.IncludeExistingAsync(job, env.Token);
+        await env.Service.ScanAsync(job, env.Token);
+        Assert.Equal(2, (await env.Service.GetSnapshotAsync(job, env.Token)).Images.Count);
+    }
+
     private sealed class Environment : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "vp-fast-" + Guid.NewGuid().ToString("N"));
