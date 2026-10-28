@@ -268,27 +268,38 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
                 target = Path.Combine(job.OutputFolder, team.FolderName, stem + ".jpg");
             else if (image.IsPrimary)
                 target = image.Released ? Path.Combine(job.OutputFolder, team.FolderName, stem + "_primary.jpg") : null;
-            else target = Path.Combine(job.IndividualsFolder!, team.FolderName, $"Player {image.PlayerNumber}", stem + ".jpg");
-            if (string.Equals(target, image.DeliveredPath, StringComparison.OrdinalIgnoreCase))
-            { image.NeedsDelivery = false; await db.SaveChangesAsync(token); continue; }
-            if (target is not null)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                if (File.Exists(target))
-                {
-                    if (await HashAsync(target, token) != image.Sha256) throw new IOException($"Destination file differs; it was not overwritten: {target}");
-                }
-                else { await using var source = File.OpenRead(image.StoredPath); await CopyNewAsync(source, target, token); }
-            }
-            if (image.DeliveredPath is { } previous && File.Exists(previous))
-            {
-                if (await HashAsync(previous, token) != image.Sha256) throw new IOException($"Previously delivered image changed; it was not removed: {previous}");
-                File.Delete(previous);
-            }
-            image.DeliveredPath = target;
+            else target = null;
+            // Individual filenames stay stable when primary selection changes. Only
+            // the team copy carries _primary and waits for Next Player.
+            var individual = job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual && !image.IsRejected
+                ? Path.Combine(job.IndividualsFolder!, team.FolderName, $"Player {image.PlayerNumber}", stem + ".jpg") : null;
+            image.IndividualDeliveredPath = await ReconcileCopyAsync(image, image.IndividualDeliveredPath, individual, token);
+            await db.SaveChangesAsync(token); // Acknowledge this destination independently.
+            image.DeliveredPath = await ReconcileCopyAsync(image, image.DeliveredPath, target, token);
             image.NeedsDelivery = false;
             await db.SaveChangesAsync(token);
         }
+    }
+
+    private static async Task<string?> ReconcileCopyAsync(FastCaptureImage image, string? previous, string? target, CancellationToken token)
+    {
+        // An acknowledged same-path copy may have been consumed. Do not publish it again.
+        if (string.Equals(target, previous, StringComparison.OrdinalIgnoreCase)) return target;
+        if (target is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            if (File.Exists(target))
+            {
+                if (await HashAsync(target, token) != image.Sha256) throw new IOException($"Destination file differs; it was not overwritten: {target}");
+            }
+            else { await using var source = File.OpenRead(image.StoredPath); await CopyNewAsync(source, target, token); }
+        }
+        if (previous is not null && File.Exists(previous))
+        {
+            if (await HashAsync(previous, token) != image.Sha256) throw new IOException($"Previously delivered image changed; it was not removed: {previous}");
+            File.Delete(previous);
+        }
+        return target;
     }
 
     private static string RejectRoot(string output) => Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(output))

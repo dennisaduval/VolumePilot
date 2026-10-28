@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:PilotCapture.Desktop"
         x:Class="PilotCapture.Desktop.FastCaptureWindow" Title="VolumePilot | Pilot Capture"
         Width="1280" Height="900" MinWidth="1000" MinHeight="760" Background="#F5F7FA" FontFamily="Segoe UI">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12" Margin="24">
@@ -39,7 +39,7 @@
       <ComboBox Grid.Row="1" Grid.ColumnSpan="2" x:Name="Teams" SelectionChanged="OnTeamChanged" FontSize="20" />
       <StackPanel Grid.Row="1" Grid.Column="2"><Button x:Name="NextPerformanceButton" Content="Next team / performance" Click="OnNextPerformanceClick" /><TextBlock x:Name="PhotoCount" FontSize="14" /></StackPanel>
     </Grid>
-    <Grid Grid.Row="3" ColumnDefinitions="300,*,*" ColumnSpacing="16">
+    <Grid Grid.Row="3" ColumnDefinitions="260,250,*" ColumnSpacing="16">
       <Grid x:Name="PlayerPanel" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="8">
         <TextBlock x:Name="PlayerTeamName" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
         <TextBlock Grid.Row="1" x:Name="CurrentPlayer" FontSize="24" FontWeight="SemiBold" />
@@ -54,7 +54,21 @@
           <Button Grid.Column="1" x:Name="RejectButton" Content="Reject / restore" MinHeight="64" FontSize="20" Click="OnRejectClick" />
         </Grid>
       </Grid>
-      <Border x:Name="PreviewPanel" Grid.Column="2" Background="#0B1F3A" CornerRadius="8" Padding="10"><Image x:Name="Preview" Stretch="Uniform" /></Border>
+      <Border x:Name="PreviewPanel" Grid.Column="2" Background="#0B1F3A" CornerRadius="8" Padding="10">
+        <Grid RowDefinitions="*,Auto" RowSpacing="8">
+          <Grid ColumnDefinitions="100,*" ColumnSpacing="10">
+            <StackPanel Spacing="8">
+              <Image x:Name="Preview" Stretch="Uniform" Height="150" PointerPressed="OnPreviewPointerPressed" PointerMoved="OnPreviewPointerMoved" />
+              <TextBlock Text="Tap the head to position the closeup." Foreground="White" TextWrapping="Wrap" />
+            </StackPanel>
+            <local:PortraitCropView Grid.Column="1" x:Name="Closeup" />
+          </Grid>
+          <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+            <Button Content="Turn 180°" Click="OnInvertPreviewClick" MinHeight="48" VerticalAlignment="Bottom" />
+            <StackPanel Grid.Column="1"><TextBlock Text="Closeup zoom" Foreground="White" /><Slider x:Name="CloseupZoom" Minimum="1" Maximum="6" Value="3" ValueChanged="OnCloseupZoomChanged" MinHeight="44" /></StackPanel>
+          </Grid>
+        </Grid>
+      </Border>
     </Grid>
     <Border Grid.Row="4" Background="White" Padding="12"><TextBlock x:Name="Status" Text="Create or resume a job, select a team, then start watching." FontSize="17" TextWrapping="Wrap" /></Border>
   </Grid>

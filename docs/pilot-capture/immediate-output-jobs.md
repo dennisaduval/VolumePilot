@@ -14,7 +14,7 @@ The prior roster workspace remains accessible through a separate compatibility b
 
 ## Print on site Team Only
 
-Select a team, then photograph individuals without selecting or completing players. Each JPEG is automatically renamed and delivered to `<chosen team output>/<team>/`. Every photo is independent; no primary, secondary, banner or CSV is created. A replacement shot does not automatically reject another shot. Reject/restore is available from the recent-image list, with a small selected-image preview and no face analysis.
+Select a team, then photograph individuals without selecting or completing players. Each JPEG is automatically renamed and delivered to `<chosen team output>/<team>/`. Every photo is independent; no primary, secondary, banner or CSV is created. A replacement shot does not automatically reject another shot. Reject/restore is available from the recent-image list, with a portrait preview and adjustable closeup, without face analysis.
 
 ## Print on site Team and Individuals
 
@@ -24,10 +24,10 @@ The first non-rejected shot is the primary. Choosing another primary replaces th
 
 Dennis explicitly chose **release primary on Next Player**, because immediately sending the first shot to a watched folder could let the downstream application process the wrong choice before the photographer changes it.
 
-- The current primary remains in managed local storage until Next Player.
-- Non-primary shots go to `<chosen individual output>/<team>/Player N/` as they arrive.
+- Every accepted shot, including the current primary, goes to `<chosen individual output>/<team>/Player N/` as it arrives.
+- The primary team copy remains held until Next Player.
 - Next Player releases the final primary into `<chosen team output>/<team>/` and appends `_primary` immediately before `.jpg`.
-- The primary is not duplicated into the player's individual folder. This follows “all other images” in the supplied requirements. If the intended sales workflow needs every shot there, that is a separate routing change.
+- The primary also remains in the player folder. Individual filenames stay stable, without a role suffix, so changing primary does not republish an already consumed individual photo. Only the team copy uses `_primary.jpg`. This supersedes the earlier interpretation of “all other images.”
 - Switching teams completes/releases a used current player before changing attribution. Returning to a team resumes its next unused slot.
 - Completed players' primary choices are locked to prevent duplicate printing. Their images may still be rejected/restored, but that cannot undo downstream processing already performed.
 
@@ -37,7 +37,7 @@ Select a team/performance group and leave the hot folder running. Every JPEG is 
 
 ## Rejection and file naming
 
-Rejected copies go to `<parent of chosen team output>/Rejects/<team>/`. The earlier delivered copy is removed only if its bytes still match the stored original's SHA-256. Restoring moves delivery back to its appropriate destination. Files already consumed, printed, edited or imported by external watchers cannot be recalled by Pilot Capture; folder changes only affect files still present there.
+Rejected copies go to `<parent of chosen team output>/Rejects/<team>/`. Both the individual copy and team copy are removed on rejection, where applicable. An earlier delivered copy is removed only if its bytes still match the stored original's SHA-256. Restoring moves delivery back to its appropriate destination. Files already consumed, printed, edited or imported by external watchers cannot be recalled by Pilot Capture; folder changes only affect files still present there.
 
 Names include the sanitized team name, player number where applicable, a per-team capture sequence and an immutable image ID. The ID avoids collisions across jobs/stations and camera filename reuse. Camera source files remain untouched. Existing different destination bytes are never overwritten. JPEG extensions remain JPEG; these fast modes do not convert to PNG.
 
@@ -57,7 +57,7 @@ New jobs record the JPEG source versions present at creation and ignore those ve
 
 - Start each of the three modes without importing a roster; verify five intro choices and future labels.
 - Team Only: shoot a burst, verify per-team files without operator advancement, then reject/restore.
-- Team and Individuals: shoot three frames, change primary, verify no team delivery until Next Player; verify only non-primary shots in Player 1, primary suffix, used-slot indicator and Player 2 after restart.
+- Team and Individuals: shoot three frames, change primary, verify no team delivery until Next Player; verify all accepted shots, including the primary, in Player 1, team-copy primary suffix, used-slot indicator and Player 2 after restart.
 - Change teams while a JPEG is writing: the boundary must wait; no frame may cross into the new team/player.
 - Action: verify many frames route while no preview or face detector runs.
 - Disconnect a destination, keep source files intact, reconnect and verify pending files deliver without duplicate completed outputs.
@@ -73,3 +73,23 @@ Only Team and Individuals adds a visible grid of **40 numbered player slots unde
 The reported calling-thread error came from reading Avalonia form controls inside a controller background delegate. Form values are now captured as immutable job settings on the UI thread before dispatch. UI regression coverage submits a real configured form, imports a schedule, checks the 40-slot grid and starts the real Action watcher to verify output delivery.
 
 Incoming detection also distinguishes **arrival from camera timestamp**. New jobs record the source versions already present at creation rather than rejecting every file with an older modification date. Newly copied JPEGs can therefore arrive with old camera timestamps and still be processed. The explicit “Also process JPEGs already in the hot folder when starting” checkbox includes pre-existing versions when desired. Existing upgraded jobs retain the old cutoff until that option is selected; recorded source versions always deduplicate. Migration 7 adds the source baseline, persistent schedule order and lossless import history without rewriting captured images.
+
+
+## Portrait and closeup hardware correction
+
+The fast print screens previously decoded JPEGs directly with Avalonia, bypassing the existing Windows EXIF-aware portrait decoder. Both print modes now decode on a separate background task, respect EXIF orientation and turn unmarked landscape pixel dimensions clockwise into a portrait. Turn 180° corrects a camera mounted in the opposite direction or an upside-down preview. Orientation and crop are display-only: the incoming file, archived original and delivered JPEG bytes/EXIF remain unchanged. Downstream print software must respect that orientation metadata; this change does not recompress or rotate delivered files.
+
+A large closeup samples the already decoded portrait, with no face detector, extra image decode or cropped file. The default is a 3× view centered near the upper middle. Tap the head in the smaller full-photo preview to reposition the closeup; mouse/pen dragging also repositions it. The zoom slider ranges from 1 to 6. Position and zoom carry forward to the next image in that window, allowing quick adjustment for taller/shorter subjects. This is an operator-positioned crop, not automatic face tracking. The unmarked-camera rotation correction also carries forward within the window. Action still performs no preview decoding.
+
+Decode work is serialized separately from capture intake; stale selections are skipped or discarded so an older preview cannot overwrite a newer selection. Full preview and closeup share one bitmap capped at 2400 pixels on its long edge. Real expression-check usefulness and latency need CAPTURE-10 testing with production JPEGs.
+
+Migration 8 adds independent individual-copy delivery acknowledgements. Existing accepted non-primary acknowledgements move into the new field without republishing consumed files. Existing primaries queue only their newly required individual copy; acknowledged team copies stay acknowledged. Failures/restarts retry each pending destination without recreating a successfully acknowledged copy that another watcher has consumed. Reject/restore removes/restores the appropriate copies subject to the existing checksum and downstream-consumption limits.
+
+Hardware checks for this correction:
+
+- Shoot portrait JPEGs from both camera mounting directions. Verify upright preview; test Turn 180° for missing/wrong camera orientation metadata.
+- Tap short and tall subjects' heads, change zoom and shoot again. Verify positioning persists and newest shot replaces the full/closeup views together.
+- Confirm all accepted player photos, including the primary, appear in the individual folder immediately. Change primary and verify individual filenames remain stable.
+- Confirm only the selected primary reaches the team output on Next Player with `_primary.jpg`.
+- Reject a photo with both copies present and verify both are removed and the reject copy appears. A consumed/printed file cannot be recalled.
+- Consume one output, disconnect the other destination, reconnect and verify the consumed delivery is not repeated.

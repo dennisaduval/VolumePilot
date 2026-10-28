@@ -45,9 +45,24 @@ class FastCaptureMigrationTests(unittest.TestCase):
         db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,individuals_folder,current_team_id,started_at_ticks) VALUES ('job','Test',2,'source','output','individuals',NULL,0)")
         db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player) VALUES ('team','job','Falcons','Falcons',1)")
         row = ('image','job','team',1,1,'source.jpg',1,4,'local.jpg','hash',1,0,0,1,None)
-        db.execute('INSERT INTO fast_capture_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',row)
+        db.execute('INSERT INTO fast_capture_images(id,job_id,team_id,player_number,sequence,source_path,source_ticks,source_length,stored_path,sha256,is_primary,is_rejected,released,needs_delivery,delivered_path) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',row)
         with self.assertRaises(sqlite3.IntegrityError):
-            db.execute('INSERT INTO fast_capture_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',('other',)+row[1:])
+            db.execute('INSERT INTO fast_capture_images(id,job_id,team_id,player_number,sequence,source_path,source_ticks,source_length,stored_path,sha256,is_primary,is_rejected,released,needs_delivery,delivered_path) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',('other',)+row[1:])
         self.assertEqual([],db.execute('PRAGMA foreign_key_check').fetchall())
         self.assertEqual(1,db.execute('SELECT current_player FROM fast_capture_teams').fetchone()[0])
+        db.close()
+
+    def test_primary_copy_upgrade_preserves_existing_acknowledgements(self):
+        db = sqlite3.connect(':memory:')
+        for path in sorted(MIGRATIONS.glob('*.sql')):
+            if not path.name.startswith('0008'):
+                db.executescript(path.read_text())
+        db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,individuals_folder,current_team_id,started_at_ticks) VALUES ('job','Test',2,'source','output','individuals',NULL,0)")
+        db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player) VALUES ('team','job','Falcons','Falcons',1)")
+        for n, primary, rejected, path in [(1,1,0,'teams/primary.jpg'), (2,0,0,'players/other.jpg'), (3,0,1,'Rejects/rejected.jpg')]:
+            db.execute('INSERT INTO fast_capture_images(id,job_id,team_id,player_number,sequence,source_path,source_ticks,source_length,stored_path,sha256,is_primary,is_rejected,released,needs_delivery,delivered_path) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                       (str(n),'job','team',1,n,str(n)+'.jpg',1,4,'local.jpg','hash',primary,rejected,1,0,path))
+        db.executescript((MIGRATIONS / '0008_individual_primary_copy.sql').read_text())
+        rows = db.execute('SELECT delivered_path, individual_delivered_path, needs_delivery FROM fast_capture_images ORDER BY id').fetchall()
+        self.assertEqual([('teams/primary.jpg',None,1), (None,'players/other.jpg',0), ('Rejects/rejected.jpg',None,0)], rows)
         db.close()

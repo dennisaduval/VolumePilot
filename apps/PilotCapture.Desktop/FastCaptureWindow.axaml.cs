@@ -1,3 +1,6 @@
+using Avalonia;
+using Avalonia.Input;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
@@ -19,6 +22,9 @@ public sealed partial class FastCaptureWindow : Window
     private bool _busy, _refreshing, _settingChoices, _closed;
     private string? _jobId, _displayedImageId, _displaySignature, _actionError;
     private Bitmap? _bitmap;
+    private readonly SemaphoreSlim _previewLock = new(1, 1);
+    private long _previewRequest;
+    private bool _previewInverted;
     private string? _slotSignature;
     private byte[]? _rosterBytes;
     private RosterCsvDocument? _rosterDocument;
@@ -36,7 +42,7 @@ public sealed partial class FastCaptureWindow : Window
         if (type == CaptureJobType.ActionPhotography) Grid.SetColumnSpan(CaptureControls, 3);
         _timer.Tick += async (_, _) => { if (!_busy && !_refreshing && _jobId is not null) await RefreshAsync(); };
         Loaded += async (_, _) => { await LoadJobsAsync(); _timer.Start(); };
-        Closed += (_, _) => { _closed = true; _timer.Stop(); _controller.Dispose(); _bitmap?.Dispose(); };
+        Closed += (_, _) => { _closed = true; _timer.Stop(); _controller.Dispose(); Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); };
     }
     private async Task RunAsync(Func<Task> action)
     {
@@ -121,13 +127,43 @@ public sealed partial class FastCaptureWindow : Window
         var image = SelectedImage();
         if (image?.Id == _displayedImageId) return;
         _displayedImageId = image?.Id;
-        Preview.Source = null; _bitmap?.Dispose(); _bitmap = null;
+        var request = Interlocked.Increment(ref _previewRequest);
+        var inverted = _previewInverted;
+        Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null;
         if (image is null) return;
-        var bytes = await File.ReadAllBytesAsync(image.StoredPath);
-        if (_closed || SelectedImage()?.Id != image.Id) return;
-        using var source = new MemoryStream(bytes);
-        _bitmap = Bitmap.DecodeToHeight(source, 700);
-        Preview.Source = _bitmap;
+        // All IO/EXIF decode/bitmap work is independent of the ingest controller.
+        // Serialize decoding and skip obsolete selections before doing expensive work.
+        var bitmap = await Task.Run(async () =>
+        {
+            await _previewLock.WaitAsync();
+            try
+            {
+                if (Interlocked.Read(ref _previewRequest) != request) return null;
+                var bytes = await File.ReadAllBytesAsync(image.StoredPath);
+                var portrait = await PortraitImageDecoder.DecodeAsync(bytes, 2400, inverted);
+                using var source = new MemoryStream(portrait);
+                return new Bitmap(source);
+            }
+            finally { _previewLock.Release(); }
+        });
+        if (_closed || Interlocked.Read(ref _previewRequest) != request) { bitmap?.Dispose(); return; }
+        _bitmap = bitmap; Preview.Source = bitmap; Closeup.Source = bitmap;
+    }
+    private void OnCloseupZoomChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    { if (Closeup is not null) Closeup.Zoom = e.NewValue; }
+    private void PositionCloseup(Point point)
+    {
+        if (_bitmap is not null && PortraitCropView.ImagePoint(_bitmap.Size, Preview.Bounds.Size, point) is { } center)
+            Closeup.Center = center;
+    }
+    private void OnPreviewPointerPressed(object? sender, PointerPressedEventArgs e)
+    { PositionCloseup(e.GetPosition(Preview)); e.Handled = true; }
+    private void OnPreviewPointerMoved(object? sender, PointerEventArgs e)
+    { if (e.GetCurrentPoint(Preview).Properties.IsLeftButtonPressed) PositionCloseup(e.GetPosition(Preview)); }
+    private async void OnInvertPreviewClick(object? sender, RoutedEventArgs e)
+    {
+        _previewInverted = !_previewInverted; _displayedImageId = null;
+        try { await ShowPreviewAsync(); } catch (Exception ex) { Status.Text = ex.Message; }
     }
     private async void OnCreateJobClick(object? sender, RoutedEventArgs e) => await CreateConfiguredJobAsync();
     public Task CreateConfiguredJobAsync() => RunAsync(async () =>
@@ -146,7 +182,7 @@ public sealed partial class FastCaptureWindow : Window
     {
         await _controller.StopAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
-        Preview.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
+        Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
         CurrentPlayer.Text = PhotoCount.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; RosterMappingPanel.IsVisible = false;
     });
     private async void OnSwitchTeamClick(object? sender, RoutedEventArgs e) => await SwitchTeamAsync(TeamName.Text ?? "");

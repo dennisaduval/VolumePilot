@@ -5,7 +5,7 @@ namespace PilotCapture.Desktop;
 
 public static class PortraitImageDecoder
 {
-    public static async Task<byte[]> DecodeAsync(byte[] bytes, uint maximumDimension = 2400)
+    public static async Task<byte[]> DecodeAsync(byte[] bytes, uint maximumDimension = 2400, bool invert = false)
     {
         using var input = new InMemoryRandomAccessStream();
         using (var writer = new DataWriter(input))
@@ -17,11 +17,14 @@ public static class PortraitImageDecoder
         input.Seek(0);
         var decoder = await BitmapDecoder.CreateAsync(input);
         var scale = Math.Min(1, maximumDimension / (double)Math.Max(decoder.PixelWidth, decoder.PixelHeight));
+        var rotation = decoder.OrientedPixelWidth > decoder.OrientedPixelHeight
+            ? (invert ? BitmapRotation.Clockwise270Degrees : BitmapRotation.Clockwise90Degrees)
+            : (invert ? BitmapRotation.Clockwise180Degrees : BitmapRotation.None);
         var transform = new BitmapTransform
         {
             ScaledWidth = Math.Max(1U, (uint)(decoder.PixelWidth * scale)),
             ScaledHeight = Math.Max(1U, (uint)(decoder.PixelHeight * scale)),
-            Rotation = decoder.OrientedPixelWidth > decoder.OrientedPixelHeight ? BitmapRotation.Clockwise90Degrees : BitmapRotation.None
+            Rotation = rotation
         };
         using var bitmap = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied,
             transform, ExifOrientationMode.RespectExifOrientation, ColorManagementMode.DoNotColorManage);

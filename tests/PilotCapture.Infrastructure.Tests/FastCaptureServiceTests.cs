@@ -43,18 +43,31 @@ public sealed class FastCaptureServiceTests
         await env.ShootAsync("first.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
         var first = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
         Assert.True(first.IsPrimary); Assert.Null(first.DeliveredPath);
+        Assert.True(File.Exists(first.IndividualDeliveredPath));
         await env.ShootAsync("second.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
         var photos = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images;
         var second = photos.Single(x => x.Id != first.Id);
-        Assert.Contains(Path.Combine("Falcons", "Player 1"), second.DeliveredPath!);
+        Assert.Contains(Path.Combine("Falcons", "Player 1"), second.IndividualDeliveredPath!);
         await env.Service.SetPrimaryAsync(second.Id, env.Token);
         photos = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images;
         Assert.Null(photos.Single(x => x.Id == second.Id).DeliveredPath);
-        Assert.True(File.Exists(photos.Single(x => x.Id == first.Id).DeliveredPath));
+        Assert.True(File.Exists(photos.Single(x => x.Id == first.Id).IndividualDeliveredPath));
         await env.Service.NextPlayerAsync(env.JobId, env.Token);
         var snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
         var released = snapshot.Images.Single(x => x.Id == second.Id);
         Assert.EndsWith("_primary.jpg", released.DeliveredPath!); Assert.True(File.Exists(released.DeliveredPath));
+        Assert.True(File.Exists(released.IndividualDeliveredPath));
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(env.Root, "individuals", "Falcons", "Player 1"), "*.jpg").Length);
+        // Both acknowledged copies can be consumed independently without being reissued.
+        File.Delete(released.DeliveredPath!); File.Delete(released.IndividualDeliveredPath!);
+        await env.Service.ScanAsync(env.JobId, env.Token);
+        Assert.False(File.Exists(released.DeliveredPath)); Assert.False(File.Exists(released.IndividualDeliveredPath));
+        await env.Service.ReviewAsync(released.Id, true, env.Token);
+        var rejected = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single(x => x.Id == released.Id);
+        Assert.Null(rejected.IndividualDeliveredPath); Assert.True(File.Exists(rejected.DeliveredPath));
+        await env.Service.ReviewAsync(released.Id, false, env.Token);
+        var restored = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single(x => x.Id == released.Id);
+        Assert.True(File.Exists(restored.IndividualDeliveredPath)); Assert.Null(restored.DeliveredPath);
         Assert.Equal(2, Assert.Single(snapshot.Teams).CurrentPlayer); Assert.Equal(new[] { 1 }, snapshot.UsedPlayers);
         Assert.False(Directory.Exists(Path.Combine(env.Root, "individuals", "Falcons", "Player 2")));
         await Assert.ThrowsAsync<InvalidOperationException>(() => env.Service.SetPrimaryAsync(first.Id, env.Token));
@@ -65,6 +78,31 @@ public sealed class FastCaptureServiceTests
         await env.ShootAsync("third.jpg"); await service.ScanAsync(env.JobId, env.Token);
         Assert.Contains((await service.GetSnapshotAsync(env.JobId, env.Token)).Images, x => x.PlayerNumber == 2 && x.IsPrimary);
     }
+    [Fact]
+    public async Task Primary_copies_retry_independently_and_rejection_removes_both_owned_copies()
+    {
+        await using var env = await Environment.CreateAsync(CaptureJobType.PrintOnSiteTeamAndIndividual);
+        await env.ShootAsync("only.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var image = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        Assert.True(File.Exists(image.IndividualDeliveredPath));
+        // A failed team delivery must not recreate an individual copy already consumed.
+        File.Delete(image.IndividualDeliveredPath!);
+        File.WriteAllText(Path.Combine(env.Root, "teams", "Falcons"), "blocked folder");
+        await Assert.ThrowsAsync<IOException>(() => env.Service.NextPlayerAsync(env.JobId, env.Token));
+        File.Delete(Path.Combine(env.Root, "teams", "Falcons"));
+        await env.Service.ScanAsync(env.JobId, env.Token);
+        image = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        Assert.True(File.Exists(image.DeliveredPath)); Assert.False(File.Exists(image.IndividualDeliveredPath));
+        // Simulate the individual file still being present for the reject ownership check.
+        File.Copy(image.StoredPath, image.IndividualDeliveredPath!);
+        var teamCopy = image.DeliveredPath; var individualCopy = image.IndividualDeliveredPath;
+        await env.Service.ReviewAsync(image.Id, true, env.Token);
+        var rejected = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        Assert.False(File.Exists(teamCopy)); Assert.False(File.Exists(individualCopy));
+        Assert.True(File.Exists(rejected.DeliveredPath)); Assert.Null(rejected.IndividualDeliveredPath);
+        Assert.True(File.Exists(image.StoredPath)); Assert.True(File.Exists(image.SourcePath));
+    }
+
     [Fact]
     public async Task Open_writers_prevent_attribution_changes_and_overlapping_folders_are_rejected()
     {

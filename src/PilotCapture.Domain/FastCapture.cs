@@ -40,6 +40,7 @@ public sealed class FastCaptureImage
     public bool Released { get; set; }
     public bool NeedsDelivery { get; set; } = true;
     public string? DeliveredPath { get; set; }
+    public string? IndividualDeliveredPath { get; set; }
 }
 
 public sealed class FastCaptureRosterImport
