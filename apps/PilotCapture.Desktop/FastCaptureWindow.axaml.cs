@@ -42,7 +42,14 @@ public sealed partial class FastCaptureWindow : Window
     {
         if (_busy) return; _busy = true; _actionError = null; UpdateButtons();
         try { await action(); await RefreshAsync(); }
-        catch (Exception exception) { _actionError = exception.Message; Status.Text = _actionError; }
+        catch (Exception exception)
+        {
+            _actionError = exception.Message;
+            // Restore the actual persisted selection if an in-flight camera file
+            // prevents the requested team/player boundary from completing.
+            await RefreshAsync();
+            Status.Text = _actionError;
+        }
         finally { _busy = false; UpdateButtons(); }
     }
     private async Task LoadJobsAsync()

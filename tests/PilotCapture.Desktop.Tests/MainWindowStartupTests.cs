@@ -97,11 +97,18 @@ public sealed class MainWindowStartupTests
                     action.FindControl<TextBox>("OutputPath")!.Text = ready;
                     Complete(action.CreateConfiguredJobAsync());
                     Complete(controller.ExecuteAsync(async service => { jobId = (await service.GetJobsAsync(PilotCapture.Domain.CaptureJobType.ActionPhotography)).Single().Id; }));
-                    Complete(action.ImportConfiguredRosterAsync(new(jobId, "action.csv", System.Text.Encoding.UTF8.GetBytes("TEAMNAME\r\nAction team\r\n"), 0, null, null)));
+                    Complete(action.ImportConfiguredRosterAsync(new(jobId, "action.csv", System.Text.Encoding.UTF8.GetBytes("TEAMNAME\r\nAction team\r\nNext team\r\n"), 0, null, null)));
                     var photo = Path.Combine(incoming, "copied-old-timestamp.jpg");
                     File.WriteAllBytes(photo, [255,216,255,1]); File.SetLastWriteTimeUtc(photo, DateTime.UtcNow.AddYears(-1));
                     action.FindControl<Button>("MonitorButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
                     PumpUntil(() => Directory.Exists(Path.Combine(ready, "Action team")) && Directory.GetFiles(Path.Combine(ready, "Action team"), "*.jpg").Length == 1);
+                    using (var writer = new FileStream(Path.Combine(incoming, "still-writing.jpg"), FileMode.Create, FileAccess.Write, FileShare.Read))
+                    {
+                        writer.Write(new byte[] { 255, 216, 255, 1 }); writer.Flush();
+                        action.FindControl<ComboBox>("Teams")!.SelectedIndex = 1;
+                        PumpUntil(() => (action.FindControl<TextBlock>("Status")!.Text ?? "").Contains("still being written", StringComparison.OrdinalIgnoreCase));
+                        Assert.Equal(0, action.FindControl<ComboBox>("Teams")!.SelectedIndex);
+                    }
                     Complete(actionController.StopAsync());
                     action.Close(); controller.Dispose();
                 }
