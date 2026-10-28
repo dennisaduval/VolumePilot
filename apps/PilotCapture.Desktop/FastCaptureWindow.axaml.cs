@@ -16,7 +16,7 @@ public sealed partial class FastCaptureWindow : Window
     private IReadOnlyList<FastCaptureJob> _jobs = [];
     private FastCaptureSnapshot? _snapshot;
     private bool _busy, _refreshing, _settingChoices, _closed;
-    private string? _jobId, _displayedImageId, _displaySignature;
+    private string? _jobId, _displayedImageId, _displaySignature, _actionError;
     private Bitmap? _bitmap;
     public event Action? ReturnRequested;
     private bool UsesPlayers => _type == CaptureJobType.PrintOnSiteTeamAndIndividual;
@@ -33,9 +33,9 @@ public sealed partial class FastCaptureWindow : Window
     }
     private async Task RunAsync(Func<Task> action)
     {
-        if (_busy) return; _busy = true; UpdateButtons();
+        if (_busy) return; _busy = true; _actionError = null; UpdateButtons();
         try { await action(); await RefreshAsync(); }
-        catch (Exception exception) { Status.Text = exception.Message; }
+        catch (Exception exception) { _actionError = exception.Message; Status.Text = _actionError; }
         finally { _busy = false; UpdateButtons(); }
     }
     private async Task LoadJobsAsync()
@@ -51,7 +51,10 @@ public sealed partial class FastCaptureWindow : Window
         try
         {
             var selected = SelectedImage()?.Id;
-            _snapshot = await _controller.ExecuteAsync(s => s.GetSnapshotAsync(_jobId));
+            var requestedJob = _jobId;
+            var snapshot = await _controller.ExecuteAsync(s => s.GetSnapshotAsync(requestedJob));
+            if (_closed || _jobId != requestedJob) return;
+            _snapshot = snapshot;
             var job = _snapshot.Job;
             JobName.Text = job.Name; SourcePath.Text = job.SourceFolder; OutputPath.Text = job.OutputFolder; IndividualsPath.Text = job.IndividualsFolder;
             _settingChoices = true;
@@ -76,7 +79,7 @@ public sealed partial class FastCaptureWindow : Window
                 _settingChoices = false;
                 await ShowPreviewAsync();
             }
-            if (_controller.Error is { } error) Status.Text = error;
+            if ((_controller.Error ?? _actionError) is { } error) Status.Text = error;
             else Status.Text = _controller.IsRunning ? $"Watching · {team?.Name ?? "select a team"} · photos route automatically" : "Paused · select a team and start watching.";
             UpdateButtons();
         }
@@ -119,7 +122,12 @@ public sealed partial class FastCaptureWindow : Window
         await RunAsync(async () => { await _controller.StopAsync(); _jobId = _jobs[SavedJobs.SelectedIndex].Id; _displaySignature = null; });
     }
     private async void OnNewJobClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
-    { await _controller.StopAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true; });
+    {
+        await _controller.StopAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
+        _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
+        Preview.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
+        CurrentPlayer.Text = PlayerSlots.Text = PhotoCount.Text = "";
+    });
     private async void OnSwitchTeamClick(object? sender, RoutedEventArgs e) => await SwitchTeamAsync(TeamName.Text ?? "");
     private async void OnTeamChanged(object? sender, SelectionChangedEventArgs e)
     { if (!_settingChoices && _snapshot is not null && Teams.SelectedIndex >= 0) await SwitchTeamAsync(_snapshot.Teams[Teams.SelectedIndex].Name); }

@@ -51,7 +51,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching teams.");
         var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
         var team = await db.FastTeams.SingleOrDefaultAsync(x => x.JobId == jobId && x.Name == name.Trim(), token);
-        if (team?.Id == job.CurrentTeamId) return;
+        if (team is not null && team.Id == job.CurrentTeamId) return;
         if (job.CurrentTeamId is not null && job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual)
             await NextPlayerAsync(jobId, token);
         if (team is null)
