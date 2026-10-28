@@ -88,6 +88,24 @@ public sealed class MainWindowStartupTests
                     Assert.True(portraitFast.FindControl<Button>("MonitorButton")!.IsEnabled);
                     Assert.DoesNotContain("calling thread", portraitFast.FindControl<TextBlock>("Status")!.Text ?? "", StringComparison.OrdinalIgnoreCase);
 
+                    // Exercise the fast print screen's real native orientation decode and
+                    // shared bitmap, not only the standalone decoder helper.
+                    File.WriteAllBytes(Path.Combine(incoming, "portrait-preview.jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
+                    Complete(controller.ExecuteAsync(service => service.ScanAsync(jobId)));
+                    var schedule = new PilotCapture.Application.FastCapture.FastRosterImportCommand(jobId, "schedule.csv",
+                        System.Text.Encoding.UTF8.GetBytes("TEAMNAME,ORDER\r\nFalcons,2\r\nBears,1\r\n"), 0, null, 1);
+                    Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
+                    var fullPreview = portraitFast.FindControl<Image>("Preview")!;
+                    var closeup = portraitFast.FindControl<PortraitCropView>("Closeup")!;
+                    Assert.NotNull(fullPreview.Source); Assert.Same(fullPreview.Source, closeup.Source);
+                    portraitFast.FindControl<Slider>("CloseupZoom")!.Value = 4;
+                    closeup.Center = new Point(0.5, 0.4);
+                    File.WriteAllBytes(Path.Combine(incoming, "next-portrait.jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
+                    Complete(controller.ExecuteAsync(service => service.ScanAsync(jobId)));
+                    Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
+                    Assert.Same(fullPreview.Source, closeup.Source);
+                    Assert.Equal(4, closeup.Zoom); Assert.Equal(new Point(0.5, 0.4), closeup.Center);
+
                     // Exercise the production controller/watcher with an existing copied JPEG
                     // whose timestamp is older than this job. No image decoding in Action mode.
                     var actionController = new FastCaptureController(provider.GetRequiredService<IServiceScopeFactory>());
