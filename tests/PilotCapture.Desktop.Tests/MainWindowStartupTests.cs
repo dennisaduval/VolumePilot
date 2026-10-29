@@ -274,6 +274,10 @@ public sealed class MainWindowStartupTests
                         Assert.True(action.FindControl<Button>("MonitorButton")!.IsEnabled);
                         Assert.Contains("verified", action.FindControl<TextBlock>("ActionClockStatus")!.Text!);
                         action.Show();
+                        // Headless layout may deliver Loaded before the test has
+                        // created its job. Explicitly exercise the loaded handler
+                        // after setup instead of relying on that scheduling race.
+                        action.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Control.LoadedEvent));
                         PumpUntil(() => action.FindControl<ComboBox>("SavedJobs")!.Items.Count == 1 && action.FindControl<Button>("MonitorButton")!.IsEnabled,
                             () => $"Action loaded={action.IsLoaded}, saved jobs={action.FindControl<ComboBox>("SavedJobs")!.Items.Count}, status={action.FindControl<TextBlock>("Status")!.Text}");
                         var photo = Path.Combine(incoming, "copied-old-timestamp.jpg");

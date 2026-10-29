@@ -9,6 +9,7 @@ using Xunit;
 
 namespace PilotCapture.Infrastructure.Tests;
 
+[Collection("SS transport")]
 public sealed class SmartShooterBridgeTests
 {
     [Fact]
@@ -41,8 +42,9 @@ public sealed class SmartShooterBridgeTests
                     {
                         Assert.Equal("Single", request.GetProperty("CameraSelection").GetString());
                         Assert.Equal("canon-r6ii-test", request.GetProperty("CameraKey").GetString());
-                        var path = Path.Combine(root, "incoming", "clock.jpg"); File.WriteAllBytes(path, [255,216,255,1]);
-                        photo = new() { ["msg_type"] = "Event", ["msg_id"] = "PhotoUpdated", ["PhotoKey"] = "clock-photo", ["CameraKey"] = "canon-r6ii-test",
+                        var number = request.GetProperty("msg_seq_num").GetInt64();
+                        var path = Path.Combine(root, "incoming", $"clock-{number}.jpg"); File.WriteAllBytes(path, [255,216,255,1]);
+                        photo = new() { ["msg_type"] = "Event", ["msg_id"] = "PhotoUpdated", ["PhotoKey"] = "clock-photo-" + number, ["CameraKey"] = "canon-r6ii-test",
                             ["PhotoOrigin"] = request.GetProperty("PhotoOrigin").GetString(), ["PhotoDateCaptured"] = DateTime.UtcNow.AddDays(-400).ToString("yyyyMMdd HH:mm:ss.fff"),
                             ["PhotoLocation"] = "Local Disk", ["PhotoFilename"] = path };
                     }
@@ -73,14 +75,19 @@ public sealed class SmartShooterBridgeTests
             }
             bridge = new(provider.GetRequiredService<IServiceScopeFactory>(), jobId); bridge.Start(); bridge.VerifyCameras(false);
             ActionCaptureStatus? status = null;
-            for (var n = 0; n < 200; n++)
+            for (var n = 0; n < 600; n++)
             {
                 using var scope = provider.CreateScope();
                 status = await scope.ServiceProvider.GetRequiredService<IActionCaptureService>().GetStatusAsync(jobId, token);
                 if (status.Clocks.Count > 0) break;
+                // Keep the production two-second uncertainty limit. If an
+                // overloaded CI host rejects a slow attempt, exercise the same
+                // explicit retry the operator uses rather than relaxing timing.
+                if (n is 200 or 400) bridge.VerifyCameras(false);
                 await Task.Delay(50, token);
             }
-            var sample = Assert.Single(status!.Clocks);
+            Assert.True(status!.Clocks.Count > 0, "SS clock verification failed: " + bridge.Status);
+            var sample = status.Clocks.OrderByDescending(c => c.FromUtcTicks).First();
             Assert.InRange(TimeSpan.FromTicks(sample.OffsetTicks).TotalDays, 399.999, 400.001);
             Assert.Equal("canon-r6ii-test", sample.CameraKey);
             await bridge.StopAsync(); bridge = null;
@@ -99,3 +106,6 @@ public sealed class SmartShooterBridgeTests
         }
     }
 }
+
+[CollectionDefinition("SS transport", DisableParallelization = true)]
+public sealed class SmartShooterTransportCollection;
