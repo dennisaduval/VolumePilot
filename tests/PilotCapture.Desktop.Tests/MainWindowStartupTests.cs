@@ -301,7 +301,17 @@ public sealed class MainWindowStartupTests
                         PumpUntil(() => Directory.Exists(Path.Combine(ready, "002_Next team")) && Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg").Length == 1);
                         var unknown = Path.Combine(incoming, "unverified-camera.jpg"); File.WriteAllBytes(unknown, [255,216,255,1]);
                         Metadata(unknown, "unknown-ui", DateTime.UtcNow.AddSeconds(10).Ticks, "unverified-camera");
-                        PumpUntil(() => (action.FindControl<TextBlock>("ActionTransferStatus")!.Text ?? "").Contains("1 held"));
+                        var heldCount = 0;
+                        PumpUntil(() =>
+                        {
+                            Complete(actionController.ActionAsync(async service => heldCount = (await service.GetStatusAsync(jobId)).HeldCount));
+                            return heldCount == 1;
+                        });
+                        // The headless dispatcher does not run the host's periodic
+                        // timer. Use the existing import action to refresh the UI,
+                        // just as earlier player/review assertions do above.
+                        Complete(action.ImportConfiguredRosterAsync(actionSchedule));
+                        Assert.Contains("1 held", action.FindControl<TextBlock>("ActionTransferStatus")!.Text!);
                         Assert.Single(Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg"));
                     }
                     finally { Complete(action.StopCaptureAsync()); action.Close(); controller.Dispose(); }
