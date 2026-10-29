@@ -125,7 +125,7 @@ public sealed class MainWindowStartupTests
                         var old = await repairDb.FastImages.SingleAsync(p => p.Id == previewPhoto.Id, cancellationToken);
                         File.Move(markedOutput, bareOutput); old.IndividualDeliveredPath = bareOutput;
                         await repairDb.SaveChangesAsync(cancellationToken);
-                    }));
+                    }, cancellationToken));
                     Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
                     var barePhoto = imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single();
                     var bareRow = Assert.IsType<StackPanel>(imageList.ItemTemplate!.Build(barePhoto));
