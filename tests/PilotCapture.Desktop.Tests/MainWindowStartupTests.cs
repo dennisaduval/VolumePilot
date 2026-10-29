@@ -136,11 +136,13 @@ public sealed class MainWindowStartupTests
                     var search = portraitFast.FindControl<TextBox>("TeamName")!;
                     var suggestions = portraitFast.FindControl<ComboBox>("Teams")!;
                     search.Text = "rock";
+                    PumpUntil(() => suggestions.Items.Count == 2);
                     Assert.Equal(2, suggestions.Items.Count);
                     var labels = suggestions.Items.OfType<ComboBoxItem>().Select(i => Assert.IsType<TextBlock>(i.Content).Text!).ToArray();
                     Assert.Contains(labels, label => label.Contains("Junior")); Assert.Contains(labels, label => label.Contains("Senior"));
                     Assert.Contains("Bears", portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text!);
                     search.Text = "104";
+                    PumpUntil(() => suggestions.Items.Count == 1);
                     Assert.Single(suggestions.Items);
                     suggestions.SelectedIndex = 0;
                     PumpUntil(() => search.Text == "" && (portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("104"));

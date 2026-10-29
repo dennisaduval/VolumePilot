@@ -21,6 +21,7 @@ public sealed partial class FastCaptureWindow : Window
     private IReadOnlyList<FastCaptureJob> _jobs = [];
     private FastCaptureSnapshot? _snapshot;
     private bool _busy, _refreshing, _settingChoices, _closed;
+    private TaskCompletionSource<bool>? _refreshCompletion;
     private string? _jobId, _displayedImageId, _displaySignature, _actionError;
     private Bitmap? _bitmap;
     private readonly SemaphoreSlim _previewLock = new(1, 1);
@@ -51,13 +52,13 @@ public sealed partial class FastCaptureWindow : Window
     private async Task RunAsync(Func<Task> action)
     {
         if (_busy) return; _busy = true; _actionError = null; UpdateButtons();
-        try { await action(); await RefreshAsync(); }
+        try { await action(); await RefreshAfterActionAsync(); }
         catch (Exception exception)
         {
             _actionError = exception.Message;
             // Restore the actual persisted selection if an in-flight camera file
             // prevents the requested team/player boundary from completing.
-            await RefreshAsync();
+            await RefreshAfterActionAsync();
             Status.Text = _actionError;
         }
         finally { _busy = false; UpdateButtons(); }
@@ -68,10 +69,19 @@ public sealed partial class FastCaptureWindow : Window
         _settingChoices = true; SavedJobs.ItemsSource = _jobs.Select(x => x.Name).ToArray(); SavedJobs.SelectedIndex = _jobs.Count > 0 ? 0 : -1; _settingChoices = false;
         if (_jobs.Count > 0) { _jobId = _jobs[0].Id; await RefreshAsync(); SetupPanel.IsExpanded = false; }
     }
+    private async Task RefreshAfterActionAsync()
+    {
+        // A timer refresh may already be decoding an older snapshot. Finish it,
+        // then read the state after this action instead of silently skipping it.
+        while (_refreshCompletion is { } pending) await pending.Task;
+        await RefreshAsync();
+    }
     private async Task RefreshAsync()
     {
         if (_jobId is null || _refreshing || _closed) return;
         _refreshing = true;
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _refreshCompletion = completion;
         try
         {
             var selected = SelectedImage()?.Id;
@@ -106,7 +116,7 @@ public sealed partial class FastCaptureWindow : Window
             UpdateButtons();
         }
         catch (Exception exception) { Status.Text = exception.Message; }
-        finally { _refreshing = false; }
+        finally { _refreshing = false; _refreshCompletion = null; completion.TrySetResult(true); }
     }
     private FastCaptureImage? SelectedImage() => ImagesList.SelectedIndex >= 0 && _snapshot is not null && ImagesList.SelectedIndex < _snapshot.Images.Count ? _snapshot.Images[ImagesList.SelectedIndex] : null;
     private void UpdateButtons()
