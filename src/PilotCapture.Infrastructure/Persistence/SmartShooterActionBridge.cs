@@ -22,7 +22,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
     private bool _repeat;
     private long _sequence;
     public void Start() => _task = Task.Factory.StartNew(Run, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-    public void VerifyCameras(bool repeatWhenIdle) => _verify.Enqueue(repeatWhenIdle);
+    public void VerifyCameras(bool repeatWhenIdle) { SetRepeatChecks(repeatWhenIdle); _verify.Enqueue(true); }
     public void SetRepeatChecks(bool enabled) => Volatile.Write(ref _repeat, enabled);
     private T Service<T>(Func<IActionCaptureService, Task<T>> action)
     {
@@ -99,7 +99,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                 try
                 {
                     Events();
-                    if (_verify.TryDequeue(out var repeat)) { _repeat = repeat; requestedVerification = true; nextIdleCheck = DateTime.MinValue; }
+                    if (_verify.TryDequeue(out _)) { requestedVerification = true; nextIdleCheck = DateTime.MinValue; }
                     var now = DateTime.UtcNow;
                     if (now >= nextSync)
                     {

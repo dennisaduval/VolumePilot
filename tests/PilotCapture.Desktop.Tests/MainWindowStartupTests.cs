@@ -252,56 +252,58 @@ public sealed class MainWindowStartupTests
                     var action = new FastCaptureWindow(PilotCapture.Domain.CaptureJobType.ActionPhotography, actionController);
                     try
                     {
-                    action.FindControl<TextBox>("JobName")!.Text = "Action watcher UI regression";
-                    action.FindControl<TextBox>("SourcePath")!.Text = incoming;
-                    action.FindControl<TextBox>("OutputPath")!.Text = ready;
-                    Complete(action.CreateConfiguredJobAsync());
-                    Complete(controller.ExecuteAsync(async service => { jobId = (await service.GetJobsAsync(PilotCapture.Domain.CaptureJobType.ActionPhotography)).Single().Id; }));
-                    var actionSchedule = new PilotCapture.Application.FastCapture.FastRosterImportCommand(jobId, "action.csv", System.Text.Encoding.UTF8.GetBytes("TEAMNAME\r\nAction team\r\nNext team\r\n"), 0, null, null);
-                    Complete(action.ImportConfiguredRosterAsync(actionSchedule));
-                    Assert.True(action.FindControl<StackPanel>("ActionSetup")!.IsVisible);
-                    Assert.False(action.FindControl<Button>("MonitorButton")!.IsEnabled);
-                    var actionStart = DateTime.UtcNow.AddMinutes(-5).Ticks;
-                    Complete(actionController.ActionAsync(async service =>
-                    {
-                        await service.EnableAsync(jobId, actionStart);
-                        await service.ReceiveSmartShooterAsync(jobId, System.Text.Json.JsonSerializer.Serialize(new { msg_id = "CameraUpdated", CameraKey = "r6-ui", CameraName = "Canon R6 II", CameraStatus = "Ready" }), actionStart);
-                        await service.ReceiveSmartShooterAsync(jobId, System.Text.Json.JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "clock-ui", CameraKey = "r6-ui", PhotoOrigin = ActionCaptureService.ClockOrigin + "ui",
-                            PhotoDateCaptured = new DateTime(actionStart).ToString("yyyyMMdd HH:mm:ss.fff") }), actionStart);
-                        await service.VerifyClockAsync(jobId, "clock-ui", actionStart, actionStart + TimeSpan.FromMilliseconds(100).Ticks);
-                    }));
-                    Complete(action.ImportConfiguredRosterAsync(actionSchedule));
-                    Assert.True(action.FindControl<Button>("MonitorButton")!.IsEnabled);
-                    Assert.Contains("verified", action.FindControl<TextBlock>("ActionClockStatus")!.Text!);
-                    var photo = Path.Combine(incoming, "copied-old-timestamp.jpg");
-                    File.WriteAllBytes(photo, [255,216,255,1]); File.SetLastWriteTimeUtc(photo, DateTime.UtcNow.AddYears(-1));
-                    void Metadata(string path, string key, long time, string camera = "r6-ui") => Complete(actionController.ActionAsync(service => service.ReceiveSmartShooterAsync(jobId,
-                        System.Text.Json.JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = key, CameraKey = camera, PhotoFilename = path,
-                            PhotoDateCaptured = new DateTime(time).ToString("yyyyMMdd HH:mm:ss.fff") }), DateTime.UtcNow.Ticks)));
-                    Metadata(photo, "first-ui", actionStart + TimeSpan.FromSeconds(5).Ticks);
-                    action.FindControl<Button>("MonitorButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-                    PumpUntil(() => Directory.Exists(Path.Combine(ready, "001_Action team")) && Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 1);
-                    using (var writer = new FileStream(Path.Combine(incoming, "still-writing.jpg"), FileMode.Create, FileAccess.Write, FileShare.Read))
-                    {
-                        writer.Write(new byte[] { 255, 216, 255, 1 }); writer.Flush();
-                        Metadata(Path.Combine(incoming, "still-writing.jpg"), "open-ui", actionStart + TimeSpan.FromSeconds(10).Ticks);
-                        action.FindControl<ComboBox>("Teams")!.SelectedIndex = 1;
-                        PumpUntil(() => (action.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("Next team"));
-                        Assert.Equal(1, action.FindControl<ComboBox>("Teams")!.SelectedIndex);
-                        var late = Path.Combine(incoming, "late-previous-team.jpg"); File.WriteAllBytes(late, [255,216,255,1]);
-                        Metadata(late, "late-ui", actionStart + TimeSpan.FromSeconds(15).Ticks);
-                        PumpUntil(() => Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 2);
+                        action.FindControl<TextBox>("JobName")!.Text = "Action watcher UI regression";
+                        action.FindControl<TextBox>("SourcePath")!.Text = incoming;
+                        action.FindControl<TextBox>("OutputPath")!.Text = ready;
+                        Complete(action.CreateConfiguredJobAsync());
+                        Complete(controller.ExecuteAsync(async service => { jobId = (await service.GetJobsAsync(PilotCapture.Domain.CaptureJobType.ActionPhotography)).Single().Id; }));
+                        var actionSchedule = new PilotCapture.Application.FastCapture.FastRosterImportCommand(jobId, "action.csv", System.Text.Encoding.UTF8.GetBytes("TEAMNAME\r\nAction team\r\nNext team\r\n"), 0, null, null);
+                        Complete(action.ImportConfiguredRosterAsync(actionSchedule));
+                        Assert.True(action.FindControl<StackPanel>("ActionSetup")!.IsVisible);
+                        Assert.False(action.FindControl<Button>("MonitorButton")!.IsEnabled);
+                        var actionStart = DateTime.UtcNow.AddMinutes(-5).Ticks;
+                        Complete(actionController.ActionAsync(async service =>
+                        {
+                            await service.EnableAsync(jobId, actionStart);
+                            await service.ReceiveSmartShooterAsync(jobId, System.Text.Json.JsonSerializer.Serialize(new { msg_id = "CameraUpdated", CameraKey = "r6-ui", CameraName = "Canon R6 II", CameraStatus = "Ready" }), actionStart);
+                            await service.ReceiveSmartShooterAsync(jobId, System.Text.Json.JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "clock-ui", CameraKey = "r6-ui", PhotoOrigin = ActionCaptureService.ClockOrigin + "ui",
+                                PhotoDateCaptured = new DateTime(actionStart).ToString("yyyyMMdd HH:mm:ss.fff") }), actionStart);
+                            await service.VerifyClockAsync(jobId, "clock-ui", actionStart, actionStart + TimeSpan.FromMilliseconds(100).Ticks);
+                        }));
+                        Complete(action.ImportConfiguredRosterAsync(actionSchedule));
+                        Assert.True(action.FindControl<Button>("MonitorButton")!.IsEnabled);
+                        Assert.Contains("verified", action.FindControl<TextBlock>("ActionClockStatus")!.Text!);
+                        action.Show();
+                        PumpUntil(() => action.FindControl<ComboBox>("SavedJobs")!.Items.Count == 1 && action.FindControl<Button>("MonitorButton")!.IsEnabled);
+                        var photo = Path.Combine(incoming, "copied-old-timestamp.jpg");
+                        File.WriteAllBytes(photo, [255,216,255,1]); File.SetLastWriteTimeUtc(photo, DateTime.UtcNow.AddYears(-1));
+                        void Metadata(string path, string key, long time, string camera = "r6-ui") => Complete(actionController.ActionAsync(service => service.ReceiveSmartShooterAsync(jobId,
+                            System.Text.Json.JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = key, CameraKey = camera, PhotoFilename = path,
+                                PhotoDateCaptured = new DateTime(time).ToString("yyyyMMdd HH:mm:ss.fff") }), DateTime.UtcNow.Ticks)));
+                        Metadata(photo, "first-ui", actionStart + TimeSpan.FromSeconds(5).Ticks);
+                        action.FindControl<Button>("MonitorButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                        PumpUntil(() => Directory.Exists(Path.Combine(ready, "001_Action team")) && Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 1);
+                        using (var writer = new FileStream(Path.Combine(incoming, "still-writing.jpg"), FileMode.Create, FileAccess.Write, FileShare.Read))
+                        {
+                            writer.Write(new byte[] { 255, 216, 255, 1 }); writer.Flush();
+                            Metadata(Path.Combine(incoming, "still-writing.jpg"), "open-ui", actionStart + TimeSpan.FromSeconds(10).Ticks);
+                            action.FindControl<ComboBox>("Teams")!.SelectedIndex = 1;
+                            PumpUntil(() => (action.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("Next team"));
+                            Assert.Equal(1, action.FindControl<ComboBox>("Teams")!.SelectedIndex);
+                            var late = Path.Combine(incoming, "late-previous-team.jpg"); File.WriteAllBytes(late, [255,216,255,1]);
+                            Metadata(late, "late-ui", actionStart + TimeSpan.FromSeconds(15).Ticks);
+                            PumpUntil(() => Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 2);
+                        }
+                        PumpUntil(() => Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 3);
+                        var nextPhoto = Path.Combine(incoming, "next-team.jpg"); File.WriteAllBytes(nextPhoto, [255,216,255,1]);
+                        Metadata(nextPhoto, "next-ui", DateTime.UtcNow.AddSeconds(5).Ticks);
+                        PumpUntil(() => Directory.Exists(Path.Combine(ready, "002_Next team")) && Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg").Length == 1);
+                        var unknown = Path.Combine(incoming, "unverified-camera.jpg"); File.WriteAllBytes(unknown, [255,216,255,1]);
+                        Metadata(unknown, "unknown-ui", DateTime.UtcNow.AddSeconds(10).Ticks, "unverified-camera");
+                        PumpUntil(() => (action.FindControl<TextBlock>("ActionTransferStatus")!.Text ?? "").Contains("1 held"));
+                        Assert.Single(Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg"));
                     }
-                    PumpUntil(() => Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 3);
-                    var nextPhoto = Path.Combine(incoming, "next-team.jpg"); File.WriteAllBytes(nextPhoto, [255,216,255,1]);
-                    Metadata(nextPhoto, "next-ui", DateTime.UtcNow.AddSeconds(5).Ticks);
-                    PumpUntil(() => Directory.Exists(Path.Combine(ready, "002_Next team")) && Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg").Length == 1);
-                    var unknown = Path.Combine(incoming, "unverified-camera.jpg"); File.WriteAllBytes(unknown, [255,216,255,1]);
-                    Metadata(unknown, "unknown-ui", DateTime.UtcNow.AddSeconds(10).Ticks, "unverified-camera");
-                    PumpUntil(() => (action.FindControl<TextBlock>("ActionTransferStatus")!.Text ?? "").Contains("1 held"));
-                    Assert.Equal(1, Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg").Length);
-                    }
-                    finally { Complete(actionController.StopAsync()); action.Close(); controller.Dispose(); }
+                    finally { Complete(action.StopCaptureAsync()); action.Close(); controller.Dispose(); }
 
                 }
                 finally { SynchronizationContext.SetSynchronizationContext(previousContext); }

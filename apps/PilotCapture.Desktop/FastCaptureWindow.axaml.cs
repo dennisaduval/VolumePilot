@@ -55,7 +55,7 @@ public sealed partial class FastCaptureWindow : Window
     }
     private async Task RunAsync(Func<Task> action)
     {
-        if (_busy) return; _busy = true; _actionError = null; UpdateButtons();
+        if (_busy) return; _busy = true; _actionError = null; _nextActionRefresh = DateTime.MinValue; UpdateButtons();
         try { await action(); await RefreshAfterActionAsync(); }
         catch (Exception exception)
         {
@@ -404,7 +404,14 @@ public sealed partial class FastCaptureWindow : Window
     { if (SelectedImage() is { } image) await _controller.ExecuteAsync(s => s.ReviewAsync(image.Id, !image.IsRejected)); });
     private async void OnImageChanged(object? sender, SelectionChangedEventArgs e)
     { if (!_settingChoices) { try { await ShowPreviewAsync(); UpdateButtons(); } catch (Exception ex) { Status.Text = ex.Message; } } }
-    private async void OnReturnClick(object? sender, RoutedEventArgs e) => await RunAsync(async () => { await _controller.StopAsync(); ReturnRequested?.Invoke(); });
+    public async Task StopCaptureAsync()
+    {
+        _timer.Stop();
+        await _controller.StopAsync();
+        await _controller.DisconnectActionAsync();
+        while (_refreshCompletion is { } pending) await pending.Task;
+    }
+    private async void OnReturnClick(object? sender, RoutedEventArgs e) => await RunAsync(async () => { await StopCaptureAsync(); ReturnRequested?.Invoke(); });
     private async Task PickAsync(TextBox box)
     {
         if (_jobId is not null) { Status.Text = "Choose New job to configure different folders."; return; }

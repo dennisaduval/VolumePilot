@@ -96,7 +96,15 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
             if (camera is not null && Text(root, "msg_id") == "PhotoUpdated") camera.LastPhotoUtcTicks = receivedUtcTicks;
         }
         if (root.TryGetProperty("CameraInfo", out var cameraInfo) && cameraInfo.ValueKind == JsonValueKind.Array)
+        {
+            var announced = cameraInfo.EnumerateArray().Select(c => Text(c, "CameraKey")).ToHashSet();
+            foreach (var absent in cameras.Where(c => c.Status is "Ready" or "Busy" && !announced.Contains(c.CameraKey)))
+            {
+                await InvalidateCameraAsync(jobId, absent.CameraKey, receivedUtcTicks, token);
+                absent.Status = "Absent";
+            }
             foreach (var c in cameraInfo.EnumerateArray()) await Camera(c);
+        }
         if (root.TryGetProperty("PhotoInfo", out var photoInfo) && photoInfo.ValueKind == JsonValueKind.Array)
             foreach (var p in photoInfo.EnumerateArray()) Photo(p);
         if (Text(root, "msg_id") == "CameraUpdated") await Camera(root);
@@ -149,7 +157,8 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
     }
 
     public Task<bool> HasCameraTransfersAsync(string jobId, CancellationToken token = default) =>
-        db.ActionPhotoMetadatas.AnyAsync(p => p.JobId == jobId && p.Location == "Camera", token);
+        db.ActionPhotoMetadatas.AnyAsync(p => p.JobId == jobId && p.Location == "Camera" &&
+            db.ActionCameras.Any(c => c.JobId == jobId && c.CameraKey == p.CameraKey && (c.Status == "Ready" || c.Status == "Busy")), token);
 
     public async Task AssignHeldAsync(string jobId, string receiptId, string teamId, CancellationToken token = default)
     {
