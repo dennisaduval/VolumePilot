@@ -130,7 +130,8 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                         {
                             // CheckClocks has no documented measurement response. Never infer
                             // an offset from CameraDateTimeOffset (a sync parameter) or arrival lag.
-                            Request("CheckClocks");
+                            try { Request("CheckClocks"); }
+                            catch (IOException) { Volatile.Write(ref _status, "SS clock read unavailable; verifying from marked test exposures."); }
                             foreach (var camera in online)
                             {
                                 var origin = ActionCaptureService.ClockOrigin + Ids.New();

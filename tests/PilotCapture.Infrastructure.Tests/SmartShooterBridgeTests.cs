@@ -46,7 +46,11 @@ public sealed class SmartShooterBridgeTests
                             ["PhotoOrigin"] = request.GetProperty("PhotoOrigin").GetString(), ["PhotoDateCaptured"] = DateTime.UtcNow.AddDays(-400).ToString("yyyyMMdd HH:mm:ss.fff"),
                             ["PhotoLocation"] = "Local Disk", ["PhotoFilename"] = path };
                     }
-                    else Assert.Equal("CheckClocks", id);
+                    else
+                    {
+                        Assert.Equal("CheckClocks", id);
+                        reply["msg_result"] = false; // Supported capture need not imply camera clock-read support.
+                    }
                     responses.SendFrame(JsonSerializer.Serialize(reply));
                 }
                 if (photo is not null) events.SendFrame(JsonSerializer.Serialize(photo));
