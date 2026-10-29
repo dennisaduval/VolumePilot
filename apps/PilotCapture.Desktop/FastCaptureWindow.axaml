@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:PilotCapture.Desktop"
         x:Class="PilotCapture.Desktop.FastCaptureWindow" Title="VolumePilot | Pilot Capture"
         Width="1280" Height="900" MinWidth="1000" MinHeight="760" Background="#F5F7FA" FontFamily="Segoe UI">
+  <Window.Styles><Style Selector="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style></Window.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12" Margin="24">
     <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
       <StackPanel Spacing="4"><TextBlock Text="PILOT CAPTURE" FontSize="14" Foreground="#175CD3" /><TextBlock x:Name="ModeTitle" FontSize="28" FontWeight="SemiBold" /></StackPanel>
@@ -19,27 +20,23 @@
         <Button Classes="primary-action" x:Name="SaveJobButton" Content="Create job" Click="OnCreateJobClick" />
       </StackPanel>
     </Expander>
-    <Border x:Name="RosterMappingPanel" IsVisible="False" Background="White" Padding="12">
-      <StackPanel Spacing="8">
-        <TextBlock x:Name="RosterFileSummary" FontWeight="SemiBold" />
-        <Grid ColumnDefinitions="*,*,*,Auto" ColumnSpacing="10">
-          <StackPanel><TextBlock Text="Team / performer column" /><ComboBox x:Name="RosterTeamColumn" /></StackPanel>
-          <StackPanel Grid.Column="1"><TextBlock Text="Sport / division (optional)" /><ComboBox x:Name="RosterGroupColumn" /></StackPanel>
-          <StackPanel Grid.Column="2"><TextBlock Text="Performance order (optional)" /><ComboBox x:Name="RosterOrderColumn" /></StackPanel>
-          <Button Grid.Column="3" Content="Import into this job" Click="OnConfirmRosterClick" VerticalAlignment="Bottom" />
-        </Grid>
-        <TextBlock Text="Without an order column, teams follow their first appearance in the CSV. Original rows and fields are preserved." TextWrapping="Wrap" />
-      </StackPanel>
-    </Border>
     </StackPanel>
-    <Grid Grid.Row="2" ColumnDefinitions="2*,2*,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto" RowSpacing="8">
-      <TextBox x:Name="TeamName" PlaceholderText="Enter team name" FontSize="22" />
-      <Button Grid.Column="1" Content="Add / switch team" Click="OnSwitchTeamClick" FontSize="20" />
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto" RowSpacing="8">
+      <TextBox x:Name="TeamName" PlaceholderText="Search team, performance number or division" FontSize="22" TextChanged="OnTeamSearchChanged" KeyDown="OnTeamSearchKeyDown" />
+      <Popup x:Name="TeamSuggestions" Placement="Bottom" IsLightDismissEnabled="True">
+        <Border Background="White" BorderBrush="#175CD3" BorderThickness="1" Padding="4">
+          <ListBox x:Name="PerformanceSuggestions" MaxHeight="280" FontSize="20" KeyDown="OnSuggestionKeyDown" />
+        </Border>
+      </Popup>
+      <Button Grid.Column="1" Content="Add / select team" Click="OnSwitchTeamClick" FontSize="20" />
       <Button Grid.Column="2" Classes="primary-action" x:Name="MonitorButton" Content="Start watching" Click="OnMonitorClick" FontSize="20" />
-      <ComboBox Grid.Row="1" Grid.ColumnSpan="2" x:Name="Teams" SelectionChanged="OnTeamChanged" FontSize="20" />
+      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="4">
+        <ComboBox x:Name="Teams" SelectionChanged="OnTeamChanged" FontSize="20" HorizontalAlignment="Stretch" MaxDropDownHeight="300" />
+        <TextBlock x:Name="ActivePerformance" FontSize="15" TextWrapping="Wrap" />
+      </StackPanel>
       <StackPanel Grid.Row="1" Grid.Column="2"><Button x:Name="NextPerformanceButton" Content="Next team / performance" Click="OnNextPerformanceClick" /><TextBlock x:Name="PhotoCount" FontSize="14" /></StackPanel>
     </Grid>
-    <Grid Grid.Row="3" ColumnDefinitions="260,250,*" ColumnSpacing="16">
+    <Grid Grid.Row="3" ColumnDefinitions="190,*,1.1*" ColumnSpacing="16">
       <Grid x:Name="PlayerPanel" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="8">
         <TextBlock x:Name="PlayerTeamName" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
         <TextBlock Grid.Row="1" x:Name="CurrentPlayer" FontSize="24" FontWeight="SemiBold" />
@@ -48,22 +45,23 @@
       </Grid>
       <Grid x:Name="CaptureControls" Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="10">
         <TextBlock Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
-        <ListBox Grid.Row="1" x:Name="ImagesList" SelectionChanged="OnImageChanged" />
-        <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="12">
-          <Button x:Name="PrimaryButton" Content="Make Primary" MinHeight="64" FontSize="20" Click="OnPrimaryClick" />
-          <Button Grid.Column="1" x:Name="RejectButton" Content="Reject / restore" MinHeight="64" FontSize="20" Click="OnRejectClick" />
+        <ListBox Grid.Row="1" x:Name="ImagesList" SelectionChanged="OnImageChanged" HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+        <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
+          <Button x:Name="PrimaryButton" Content="Primary" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnPrimaryClick" />
+          <Button Grid.Column="1" x:Name="RejectButton" Content="Reject" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnRejectClick" />
         </Grid>
       </Grid>
       <Border x:Name="PreviewPanel" Grid.Column="2" Background="#0B1F3A" CornerRadius="8" Padding="10">
-        <Grid RowDefinitions="*,Auto" RowSpacing="8">
-          <Grid ColumnDefinitions="100,*" ColumnSpacing="10">
+        <Grid RowDefinitions="*,Auto,Auto" RowSpacing="8">
+          <Grid ColumnDefinitions="80,*" ColumnSpacing="10">
             <StackPanel Spacing="8">
-              <Image x:Name="Preview" Stretch="Uniform" Height="150" PointerPressed="OnPreviewPointerPressed" PointerMoved="OnPreviewPointerMoved" />
+              <Image x:Name="Preview" Stretch="Uniform" Height="120" PointerPressed="OnPreviewPointerPressed" PointerMoved="OnPreviewPointerMoved" />
               <TextBlock Text="Tap the head to position the closeup." Foreground="White" TextWrapping="Wrap" />
             </StackPanel>
             <local:PortraitCropView Grid.Column="1" x:Name="Closeup" />
           </Grid>
-          <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+          <TextBlock Grid.Row="1" x:Name="PreviewImageStatus" Foreground="White" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+          <Grid Grid.Row="2" ColumnDefinitions="Auto,*" ColumnSpacing="10">
             <Button Content="Turn 180°" Click="OnInvertPreviewClick" MinHeight="48" VerticalAlignment="Bottom" />
             <StackPanel Grid.Column="1"><TextBlock Text="Closeup zoom" Foreground="White" /><Slider x:Name="CloseupZoom" Minimum="1" Maximum="6" Value="3" ValueChanged="OnCloseupZoomChanged" MinHeight="44" /></StackPanel>
           </Grid>

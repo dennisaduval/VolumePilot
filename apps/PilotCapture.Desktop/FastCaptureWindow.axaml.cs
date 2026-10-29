@@ -4,11 +4,12 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
+using Avalonia.Media;
+using Avalonia.Controls.Templates;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using PilotCapture.Application.FastCapture;
 using PilotCapture.Domain;
-using PilotCapture.Application.Rosters;
 using PilotCapture.Infrastructure.Persistence;
 namespace PilotCapture.Desktop;
 
@@ -26,14 +27,17 @@ public sealed partial class FastCaptureWindow : Window
     private long _previewRequest;
     private bool _previewInverted;
     private string? _slotSignature;
-    private byte[]? _rosterBytes;
-    private RosterCsvDocument? _rosterDocument;
-    private string _rosterName = "";
+    private IReadOnlyList<FastCaptureTeam> _visibleTeams = [];
     public event Action? ReturnRequested;
     private bool UsesPlayers => _type == CaptureJobType.PrintOnSiteTeamAndIndividual;
     public FastCaptureWindow(CaptureJobType type, FastCaptureController controller)
     {
         _type = type; _controller = controller; InitializeComponent();
+        ImagesList.ItemTemplate = new FuncDataTemplate<FastCaptureImage>((image, _) => image is null ? null : ImageRow(image));
+        TeamSuggestions.PlacementTarget = TeamName;
+        PerformanceSuggestions.AddHandler(InputElement.PointerReleasedEvent, OnSuggestionPicked, RoutingStrategies.Bubble, handledEventsToo: true);
+        PerformanceSuggestions.ItemTemplate = new FuncDataTemplate<FastCaptureTeam>((team, _) => new TextBlock
+            { Text = team is null ? "" : FastPerformanceSearch.Label(team), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6), MinHeight = 44 });
         ModeTitle.Text = type switch { CaptureJobType.PrintOnSiteTeamsOnly => "Print on site · Team Only", CaptureJobType.ActionPhotography => "Action · automatic image routing", _ => "Print on site · Team and Individuals" };
         PlayerPanel.IsVisible = PrimaryButton.IsVisible = IndividualsSetup.IsVisible = UsesPlayers;
         PreviewPanel.IsVisible = type != CaptureJobType.ActionPhotography;
@@ -78,10 +82,7 @@ public sealed partial class FastCaptureWindow : Window
             var job = _snapshot.Job;
             JobName.Text = job.Name; SourcePath.Text = job.SourceFolder; OutputPath.Text = job.OutputFolder; IndividualsPath.Text = job.IndividualsFolder;
             _settingChoices = true;
-            var teamsSignature = string.Join('|', _snapshot.Teams.Select(t => $"{t.Id}:{t.SortOrder}:{t.PerformanceLabel}"));
-            if (Teams.Tag as string != teamsSignature)
-            { Teams.ItemsSource = _snapshot.Teams.Select(FormatPerformance).ToArray(); Teams.Tag = teamsSignature; }
-            Teams.SelectedIndex = _snapshot.Teams.ToList().FindIndex(x => x.Id == job.CurrentTeamId);
+            UpdatePerformanceChoices();
             _settingChoices = false;
             var team = _snapshot.Teams.FirstOrDefault(x => x.Id == job.CurrentTeamId);
             PlayerTeamName.Text = team?.Name ?? "Select a team";
@@ -94,7 +95,7 @@ public sealed partial class FastCaptureWindow : Window
                 var previousNewest = _displaySignature?.Split('|')[0].Split(':')[0];
                 _displaySignature = signature;
                 _settingChoices = true;
-                ImagesList.ItemsSource = _snapshot.Images.Select(x => $"{(x.PlayerNumber > 0 ? "Player " + x.PlayerNumber + " · " : "")}{x.Sequence:0000} · {Path.GetFileName(x.SourcePath)}{(x.IsPrimary ? " · PRIMARY" : "")}{(x.IsRejected ? " · REJECTED" : "")}{(x.NeedsDelivery ? " · pending" : "")}").ToArray();
+                ImagesList.ItemsSource = _snapshot.Images;
                 var index = previousNewest != _snapshot.Images.FirstOrDefault()?.Id ? 0 : _snapshot.Images.ToList().FindIndex(x => x.Id == selected);
                 ImagesList.SelectedIndex = _snapshot.Images.Count > 0 ? Math.Max(0, index) : -1;
                 _settingChoices = false;
@@ -115,7 +116,8 @@ public sealed partial class FastCaptureWindow : Window
         NextPlayerButton.IsEnabled = !_busy && _snapshot?.Job.CurrentTeamId is not null;
         PrimaryButton.IsEnabled = !_busy && SelectedImage() is { Released: false };
         RejectButton.IsEnabled = !_busy && SelectedImage() is not null;
-        RejectButton.Content = SelectedImage()?.IsRejected == true ? "Restore image" : "Reject image";
+        RejectButton.Content = SelectedImage()?.IsRejected == true ? "Restore" : "Reject";
+        PreviewImageStatus.Text = SelectedImage() is { } selected ? ImageState(selected) : "No image selected";
         SaveJobButton.IsEnabled = !_busy && _jobId is null;
         ImportRosterButton.IsEnabled = !_busy && _jobId is not null;
         NextPerformanceButton.IsEnabled = !_busy && _snapshot is { Teams.Count: > 0 };
@@ -176,24 +178,107 @@ public sealed partial class FastCaptureWindow : Window
     private async void OnSavedJobChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_settingChoices || SavedJobs.SelectedIndex < 0) return;
-        await RunAsync(async () => { await _controller.StopAsync(); _jobId = _jobs[SavedJobs.SelectedIndex].Id; _displaySignature = null; });
+        await RunAsync(async () => { await _controller.StopAsync(); _jobId = _jobs[SavedJobs.SelectedIndex].Id; _displaySignature = null; ClearTeamSearch(); });
     }
     private async void OnNewJobClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         await _controller.StopAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
         Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
-        CurrentPlayer.Text = PhotoCount.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; RosterMappingPanel.IsVisible = false;
+        CurrentPlayer.Text = PhotoCount.Text = ActivePerformance.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; ClearTeamSearch();
     });
-    private async void OnSwitchTeamClick(object? sender, RoutedEventArgs e) => await SwitchTeamAsync(TeamName.Text ?? "");
+    private async void OnSwitchTeamClick(object? sender, RoutedEventArgs e) => await SelectOrAddTeamAsync();
     private async void OnTeamChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (_settingChoices || _snapshot is null || Teams.SelectedIndex < 0) return;
-        var jobId = _snapshot.Job.Id; var teamId = _snapshot.Teams[Teams.SelectedIndex].Id;
-        await RunAsync(() => _controller.ExecuteAsync(s => s.SelectPerformanceAsync(jobId, teamId)));
+        if (_settingChoices || _snapshot is null || Teams.SelectedIndex < 0 || Teams.SelectedIndex >= _visibleTeams.Count) return;
+        var jobId = _snapshot.Job.Id; var teamId = _visibleTeams[Teams.SelectedIndex].Id;
+        await SelectPerformanceAsync(jobId, teamId);
     }
-    private async Task SwitchTeamAsync(string name) => await RunAsync(async () =>
-    { if (_jobId is not null) await _controller.ExecuteAsync(s => s.SelectTeamAsync(_jobId, name)); });
+    private Task SelectPerformanceAsync(string jobId, string teamId) => RunAsync(async () =>
+    {
+        await _controller.ExecuteAsync(s => s.SelectPerformanceAsync(jobId, teamId));
+        ClearTeamSearch();
+    });
+    private Task SelectOrAddTeamAsync() => RunAsync(async () =>
+    {
+        if (_snapshot is not { } snapshot) return;
+        var name = TeamName.Text?.Trim() ?? "";
+        if (name.Length == 0) throw new ArgumentException("Type a team name or performance number.");
+        var matches = FastPerformanceSearch.Find(snapshot.Teams, name);
+        if (matches.Count > 1) throw new ArgumentException("Several teams match. Choose the performance / division in the list.");
+        if (matches.Count == 1) await _controller.ExecuteAsync(s => s.SelectPerformanceAsync(snapshot.Job.Id, matches[0].Id));
+        else await _controller.ExecuteAsync(s => s.SelectTeamAsync(snapshot.Job.Id, name));
+        ClearTeamSearch();
+    });
+    private void OnTeamSearchChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_settingChoices || _snapshot is null) return;
+        UpdatePerformanceChoices();
+        TeamSuggestions.Width = Math.Max(300, TeamName.Bounds.Width);
+        TeamSuggestions.IsOpen = !string.IsNullOrWhiteSpace(TeamName.Text) && _visibleTeams.Count > 0 && IsVisible;
+    }
+    private async void OnTeamSearchKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            if (PerformanceSuggestions.SelectedItem is FastCaptureTeam selected && _snapshot is { } snapshot)
+                await SelectPerformanceAsync(snapshot.Job.Id, selected.Id);
+            else await SelectOrAddTeamAsync();
+        }
+        else if (e.Key == Key.Down || e.Key == Key.Up)
+        {
+            e.Handled = true;
+            if (_visibleTeams.Count > 0) PerformanceSuggestions.SelectedIndex = Math.Clamp(
+                PerformanceSuggestions.SelectedIndex + (e.Key == Key.Down ? 1 : -1), 0, _visibleTeams.Count - 1);
+        }
+        else if (e.Key == Key.Escape) { ClearTeamSearch(); UpdatePerformanceChoices(); e.Handled = true; }
+    }
+    private async void OnSuggestionPicked(object? sender, PointerReleasedEventArgs e)
+    {
+        if (PerformanceSuggestions.SelectedItem is FastCaptureTeam selected && _snapshot is { } snapshot)
+        { e.Handled = true; await SelectPerformanceAsync(snapshot.Job.Id, selected.Id); }
+    }
+    private async void OnSuggestionKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && PerformanceSuggestions.SelectedItem is FastCaptureTeam selected && _snapshot is { } snapshot)
+        { e.Handled = true; await SelectPerformanceAsync(snapshot.Job.Id, selected.Id); }
+    }
+    private void ClearTeamSearch()
+    {
+        var setting = _settingChoices; _settingChoices = true;
+        TeamName.Text = ""; Teams.Tag = null; Teams.IsDropDownOpen = false; TeamSuggestions.IsOpen = false;
+        _settingChoices = setting;
+    }
+    private void UpdatePerformanceChoices()
+    {
+        if (_snapshot is not { } snapshot) return;
+        var query = TeamName.Text ?? "";
+        var signature = snapshot.Job.CurrentTeamId + "|" + query + "|" + string.Join('|', snapshot.Teams.Select(t => $"{t.Id}:{t.SortOrder}:{t.Name}:{t.PerformanceLabel}:{t.Details}"));
+        ActivePerformance.Text = "Current: " + (snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId) is { } current ? FastPerformanceSearch.Label(current) : "select a team / performance");
+        if (Teams.Tag as string == signature) return;
+        var setting = _settingChoices; _settingChoices = true;
+        _visibleTeams = FastPerformanceSearch.Find(snapshot.Teams, query);
+        Teams.ItemsSource = _visibleTeams.Select(t => new ComboBoxItem { Content = new TextBlock
+            { Text = FastPerformanceSearch.Label(t), TextWrapping = TextWrapping.Wrap, FontSize = 20 } }).ToArray();
+        Teams.SelectedIndex = _visibleTeams.ToList().FindIndex(t => t.Id == snapshot.Job.CurrentTeamId);
+        PerformanceSuggestions.ItemsSource = _visibleTeams;
+        PerformanceSuggestions.SelectedIndex = -1;
+        Teams.PlaceholderText = _visibleTeams.Count == 0 ? "No matches. Add a new team, or change your search." : "Choose a matching team / performance";
+        Teams.Tag = signature; _settingChoices = setting;
+    }
+    private static string ImageState(FastCaptureImage image) =>
+        (image.PlayerNumber > 0 ? $"Player {image.PlayerNumber} · " : "") + $"{image.Sequence:0000} · " +
+        (image.IsRejected ? "REJECTED" : image.IsPrimary ? "PRIMARY" : "Accepted") + (image.NeedsDelivery ? " · pending" : "");
+    private static Control ImageRow(FastCaptureImage image)
+    {
+        var row = new StackPanel { Spacing = 4, Margin = new Thickness(0, 6) };
+        row.Children.Add(new TextBlock { Text = Path.GetFileName(image.SourcePath), TextWrapping = TextWrapping.Wrap, FontSize = 17 });
+        row.Children.Add(new TextBlock { Text = ImageState(image), TextWrapping = TextWrapping.Wrap, FontSize = 15,
+            FontWeight = FontWeight.SemiBold, Foreground = image.IsRejected ? Brushes.Firebrick : Brushes.DarkBlue });
+        ToolTip.SetTip(row, Path.GetFileName(image.SourcePath));
+        return row;
+    }
     private async void OnMonitorClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         if (_controller.IsRunning) await _controller.StopAsync();
@@ -222,7 +307,6 @@ public sealed partial class FastCaptureWindow : Window
     private async void OnSourceFolderClick(object? sender, RoutedEventArgs e) => await PickAsync(SourcePath);
     private async void OnOutputFolderClick(object? sender, RoutedEventArgs e) => await PickAsync(OutputPath);
     private async void OnIndividualsFolderClick(object? sender, RoutedEventArgs e) => await PickAsync(IndividualsPath);
-    private static string FormatPerformance(FastCaptureTeam team) => $"{team.SortOrder}. {team.Name}" + (team.PerformanceLabel.Length > 0 ? $" · {team.PerformanceLabel}" : "");
     private void RenderPlayerSlots(FastCaptureTeam? team)
     {
         if (!UsesPlayers || _snapshot is null) return;
@@ -252,50 +336,25 @@ public sealed partial class FastCaptureWindow : Window
         var index = snapshot.Teams.ToList().FindIndex(t => t.Id == snapshot.Job.CurrentTeamId);
         if (index + 1 >= snapshot.Teams.Count) { _actionError = "This is the last performance in the imported order."; Status.Text = _actionError; return; }
         var next = snapshot.Teams[index + 1].Id;
-        await RunAsync(() => _controller.ExecuteAsync(s => s.SelectPerformanceAsync(snapshot.Job.Id, next)));
+        await SelectPerformanceAsync(snapshot.Job.Id, next);
     }
     private async void OnImportRosterClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        if (_jobId is null) throw new InvalidOperationException("Create or resume a job before importing its roster.");
+        if (_jobId is not { } jobId) throw new InvalidOperationException("Create or resume a job before importing its roster.");
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         { Title = "Choose roster / performance order CSV", AllowMultiple = false, FileTypeFilter = [new FilePickerFileType("CSV") { Patterns = ["*.csv"] }] });
         if (files.Count == 0) return;
-        _rosterName = files[0].Name;
         await using var input = await files[0].OpenReadAsync(); using var buffer = new MemoryStream();
-        await input.CopyToAsync(buffer); _rosterBytes = buffer.ToArray();
-        using var source = new MemoryStream(_rosterBytes); _rosterDocument = RosterCsvReader.Read(source);
-        SetColumnOptions(RosterTeamColumn, _rosterDocument.Headers, ["TEAMNAME", "TEAMSCHOOL", "TEAM", "PERFORMER", "SCHOOLNAME", "NAME"], true);
-        SetColumnOptions(RosterGroupColumn, _rosterDocument.Headers, ["SPORT", "DIVISION", "GROUP", "CATEGORY"], false);
-        if ((RosterTeamColumn.SelectedItem as ComboBoxItem)?.Tag is int selectedTeam &&
-            (RosterGroupColumn.SelectedItem as ComboBoxItem)?.Tag is int selectedGroup && selectedTeam == selectedGroup)
-            RosterGroupColumn.SelectedIndex = 0;
-        SetColumnOptions(RosterOrderColumn, _rosterDocument.Headers, ["PERFORMANCEORDER", "RUNORDER", "ORDER", "PERFORMANCENUMBER"], false);
-        RosterFileSummary.Text = $"{_rosterName} · {_rosterDocument.Rows.Count} rows. Confirm the columns below.";
-        RosterMappingPanel.IsVisible = true;
-    });
-    private async void OnConfirmRosterClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
-    {
-        if (_jobId is not { } jobId || _rosterBytes is null) return;
-        var teamColumn = (RosterTeamColumn.SelectedItem as ComboBoxItem)?.Tag as int? ?? throw new ArgumentException("Choose a team / performer column.");
-        var command = new FastRosterImportCommand(jobId, _rosterName, _rosterBytes, teamColumn,
-            (RosterGroupColumn.SelectedItem as ComboBoxItem)?.Tag as int?, (RosterOrderColumn.SelectedItem as ComboBoxItem)?.Tag as int?);
-        await ImportRosterCoreAsync(command);
+        await input.CopyToAsync(buffer);
+        var mapping = new FastRosterMappingWindow(jobId, files[0].Name, buffer.ToArray());
+        var command = await mapping.ShowDialog<FastRosterImportCommand?>(this);
+        if (command is not null) await ImportRosterCoreAsync(command);
     });
     public Task ImportConfiguredRosterAsync(FastRosterImportCommand command) => RunAsync(() => ImportRosterCoreAsync(command));
     private async Task ImportRosterCoreAsync(FastRosterImportCommand command)
     {
         var result = await _controller.ExecuteAsync(s => s.ImportRosterAsync(command));
-        RosterMappingPanel.IsVisible = false;
         _actionError = $"Imported {result.Teams} teams / performances from {result.Rows} source rows.";
-    }
-    private static void SetColumnOptions(ComboBox box, IReadOnlyList<string> headers, string[] aliases, bool required)
-    {
-        box.Items.Clear(); if (!required) box.Items.Add(new ComboBoxItem { Content = "(not mapped)" });
-        foreach (var item in headers.Select((text, index) => (text, index)).OrderBy(x => x.text, StringComparer.OrdinalIgnoreCase))
-            box.Items.Add(new ComboBoxItem { Content = $"{item.text} [{item.index}]", Tag = item.index });
-        var suggested = headers.Select((h, i) => (h, i)).FirstOrDefault(x => aliases.Contains(string.Concat(x.h.Where(char.IsLetterOrDigit)).ToUpperInvariant()));
-        box.SelectedItem = box.Items.OfType<ComboBoxItem>().FirstOrDefault(x => x.Tag is int i && suggested.h is not null && i == suggested.i)
-            ?? (required ? null : box.Items[0]);
     }
 
 }

@@ -54,16 +54,18 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Enter a team name.");
         if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching teams.");
         var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
-        var team = await db.FastTeams.Where(x => x.JobId == jobId && x.Name == name.Trim()).OrderBy(x => x.SortOrder).FirstOrDefaultAsync(token);
+        var matches = await db.FastTeams.Where(x => x.JobId == jobId && x.Name == name.Trim()).OrderBy(x => x.SortOrder).ToListAsync(token);
+        if (matches.Count > 1) throw new ArgumentException("Several performances use that team name. Select a specific performance / division.");
+        var team = matches.SingleOrDefault();
         if (team is not null && team.Id == job.CurrentTeamId) return;
         if (job.CurrentTeamId is not null && job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual)
             await NextPlayerAsync(jobId, token);
         if (team is null)
         {
-            var folder = JobMediaService.SafeName(name.Trim());
-            if (await db.FastTeams.AnyAsync(x => x.JobId == jobId && x.FolderName == folder, token)) folder += "_" + Ids.New();
-            team = new FastCaptureTeam { JobId = jobId, Name = name.Trim(), FolderName = folder,
-                SortOrder = (await db.FastTeams.Where(x => x.JobId == jobId).Select(x => (int?)x.SortOrder).MaxAsync(token) ?? 0) + 1 };
+            var teams = await db.FastTeams.Where(x => x.JobId == jobId).ToListAsync(token);
+            var next = teams.Select(x => x.SortOrder).DefaultIfEmpty(0).Max() + 1;
+            team = new FastCaptureTeam { JobId = jobId, Name = name.Trim(), SortOrder = next };
+            team.FolderName = PerformanceFolder(team, teams);
             db.FastTeams.Add(team);
         }
         job.CurrentTeamId = team.Id;
@@ -205,49 +207,77 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
     {
         var job = await db.FastJobs.SingleAsync(x => x.Id == command.JobId, token);
         using var input = new MemoryStream(command.Content, false);
-        var document = RosterCsvReader.Read(input);
-        foreach (var column in new int?[] { command.TeamColumn, command.GroupColumn, command.OrderColumn })
-            if (column is < 0 || column >= document.Headers.Count) throw new ArgumentException("Review the selected CSV columns.");
+        var raw = RosterCsvReader.Read(input);
+        var document = FastRosterColumns.WithHeader(raw, command.HeaderRecordNumber);
+        var details = (command.DetailColumns ?? []).Concat(command.GroupColumn is { } group ? new[] { group } : [])
+            .Distinct().Order().ToArray();
+        var mapped = new int?[] { command.TeamColumn, command.OrderColumn }.Concat(details.Select(x => (int?)x)).ToArray();
+        foreach (var column in mapped)
+            if (column is < 0 || column >= FastRosterColumns.ColumnCount(document)) throw new ArgumentException("Review the selected CSV columns.");
+        if (mapped.Where(x => x.HasValue).Distinct().Count() != mapped.Count(x => x.HasValue))
+            throw new ArgumentException("Use each CSV column for one purpose only.");
         string Cell(RosterCsvRow row, int? index) => index is { } i && i < row.Cells.Count ? row.Cells[i].Value.Trim() : "";
-        var entries = document.Rows.Select(row => new
+        var entries = document.Rows.Select(row =>
         {
-            Row = row.RecordNumber,
-            Name = Cell(row, command.TeamColumn).Length == 0 ? "" : string.Join(" / ", new[] { Cell(row, command.TeamColumn), Cell(row, command.GroupColumn) }.Where(x => x.Length > 0)),
-            Order = Cell(row, command.OrderColumn)
-        }).Where(x => x.Name.Length > 0).GroupBy(x => (x.Name.ToUpperInvariant(), x.Order.ToUpperInvariant()))
-            .Select(x => x.First()).ToList();
-        if (entries.Count == 0) throw new ArgumentException("The selected team/group columns contain no names.");
+            var order = Cell(row, command.OrderColumn);
+            var name = command.TeamColumn is null ? (order.Length > 0 ? $"Performance {order}" : $"Entry {row.RecordNumber + 1}") : Cell(row, command.TeamColumn);
+            var values = details.Select(i => Cell(row, i)).ToArray();
+            var display = string.Join(" · ", details.Select((i, n) => values[n].Length > 0 ? $"{FastRosterColumns.Label(document, i)}: {values[n]}" : "").Where(x => x.Length > 0));
+            var key = order.ToUpperInvariant();
+            if (values.Any(v => v.Length > 0))
+                key += "|" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(values.Select(v => v.ToUpperInvariant())))));
+            return new { Row = row.RecordNumber, Name = name, Order = order, Details = display, Key = key,
+                LegacyName = string.Join(" / ", new[] { name }.Concat(values).Where(v => v.Length > 0)) };
+        }).Where(x => x.Name.Length > 0).GroupBy(x => (x.Name.ToUpperInvariant(), x.Key)).Select(x => x.First()).ToList();
+        if (entries.Count == 0) throw new ArgumentException("The selected columns contain no teams / performances.");
         if (command.OrderColumn is not null && entries.All(x => decimal.TryParse(x.Order, NumberStyles.Number, CultureInfo.InvariantCulture, out _)))
             entries = entries.OrderBy(x => decimal.Parse(x.Order, CultureInfo.InvariantCulture)).ThenBy(x => x.Row).ToList();
         var teams = await db.FastTeams.Where(x => x.JobId == job.Id).ToListAsync(token);
+        var photographed = (await db.FastImages.Where(x => x.JobId == job.Id).Select(x => x.TeamId).Distinct().ToListAsync(token)).ToHashSet();
         var importedIds = new HashSet<string>();
         var rank = 0;
         await using var transaction = await db.Database.BeginTransactionAsync(token);
         foreach (var entry in entries)
         {
-            var key = entry.Order.ToUpperInvariant();
-            var team = teams.FirstOrDefault(x => x.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase) && x.PerformanceKey == key);
+            var team = teams.FirstOrDefault(x => x.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase) && x.PerformanceKey == entry.Key);
+            // Preserve IDs from previews that combined one grouping column into Name.
+            team ??= teams.FirstOrDefault(x => x.Details.Length == 0 && x.Name.Equals(entry.LegacyName, StringComparison.OrdinalIgnoreCase)
+                && x.PerformanceKey == entry.Order.ToUpperInvariant() && !importedIds.Contains(x.Id));
             if (team is null)
             {
-                var sameName = teams.FirstOrDefault(x => x.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase));
-                var folder = sameName?.FolderName ?? JobMediaService.SafeName(entry.Name);
-                if (sameName is null && teams.Any(x => x.FolderName.Equals(folder, StringComparison.OrdinalIgnoreCase))) folder += "_" + Ids.New();
-                team = new FastCaptureTeam { JobId = job.Id, Name = entry.Name, FolderName = folder, PerformanceKey = key };
+                team = new FastCaptureTeam { JobId = job.Id };
                 teams.Add(team); db.FastTeams.Add(team);
             }
-            team.SortOrder = ++rank; team.PerformanceLabel = entry.Order; importedIds.Add(team.Id);
+            team.Name = entry.Name; team.PerformanceKey = entry.Key; team.Details = entry.Details;
+            team.SortOrder = ++rank; team.PerformanceLabel = entry.Order;
+            // Once any photo belongs to this performance, never move or reissue its
+            // watched outputs merely because a roster is reimported or upgraded.
+            if (!photographed.Contains(team.Id)) team.FolderName = PerformanceFolder(team, teams);
+            importedIds.Add(team.Id);
         }
         foreach (var extra in teams.Where(x => !importedIds.Contains(x.Id)).OrderBy(x => x.SortOrder)) extra.SortOrder = ++rank;
         db.FastRosterImports.Add(new FastCaptureRosterImport
         {
             JobId = job.Id, SourceName = command.SourceName, Sha256 = Convert.ToHexString(SHA256.HashData(command.Content)),
-            SourceDataJson = JsonSerializer.Serialize(document),
-            MappingJson = JsonSerializer.Serialize(new { command.TeamColumn, command.GroupColumn, command.OrderColumn })
+            SourceDataJson = JsonSerializer.Serialize(raw),
+            MappingJson = JsonSerializer.Serialize(new { command.TeamColumn, command.GroupColumn, command.OrderColumn, command.DetailColumns, command.HeaderRecordNumber })
         });
         job.CurrentTeamId ??= teams.OrderBy(x => x.SortOrder).First().Id;
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         return new(entries.Count, document.Rows.Count);
+    }
+
+    private static string PerformanceFolder(FastCaptureTeam team, IReadOnlyList<FastCaptureTeam> teams)
+    {
+        var order = team.PerformanceLabel.Length > 0 ? team.PerformanceLabel : team.SortOrder.ToString("000", CultureInfo.InvariantCulture);
+        if (long.TryParse(order, NumberStyles.None, CultureInfo.InvariantCulture, out var number)) order = number.ToString("000", CultureInfo.InvariantCulture);
+        var folder = JobMediaService.SafeName(order + "_" + team.Name);
+        bool Taken(string candidate) => teams.Any(t => t.Id != team.Id && t.FolderName.Equals(candidate, StringComparison.OrdinalIgnoreCase));
+        if (Taken(folder) && team.Details.Length > 0)
+            folder = JobMediaService.SafeName(folder + "_" + team.Details.Replace(" · ", "_"));
+        if (Taken(folder)) folder = JobMediaService.SafeName(folder[..Math.Min(folder.Length, 80)] + "_" + team.Id[^8..]);
+        return folder;
     }
 
     private static bool IsJpeg(string path) => Path.GetExtension(path).Equals(".jpg", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".jpeg", StringComparison.OrdinalIgnoreCase);

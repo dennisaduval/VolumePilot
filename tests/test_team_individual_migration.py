@@ -55,7 +55,7 @@ class FastCaptureMigrationTests(unittest.TestCase):
     def test_primary_copy_upgrade_preserves_existing_acknowledgements(self):
         db = sqlite3.connect(':memory:')
         for path in sorted(MIGRATIONS.glob('*.sql')):
-            if not path.name.startswith('0008'):
+            if path.name < '0008':
                 db.executescript(path.read_text())
         db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,individuals_folder,current_team_id,started_at_ticks) VALUES ('job','Test',2,'source','output','individuals',NULL,0)")
         db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player) VALUES ('team','job','Falcons','Falcons',1)")
@@ -65,4 +65,16 @@ class FastCaptureMigrationTests(unittest.TestCase):
         db.executescript((MIGRATIONS / '0008_individual_primary_copy.sql').read_text())
         rows = db.execute('SELECT delivered_path, individual_delivered_path, needs_delivery FROM fast_capture_images ORDER BY id').fetchall()
         self.assertEqual([('teams/primary.jpg',None,1), (None,'players/other.jpg',0), ('Rejects/rejected.jpg',None,0)], rows)
+        db.close()
+
+    def test_performance_details_upgrade_preserves_existing_names_and_deliveries(self):
+        db = sqlite3.connect(':memory:')
+        for path in sorted(MIGRATIONS.glob('*.sql')):
+            if path.name < '0009':
+                db.executescript(path.read_text())
+        db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,current_team_id,started_at_ticks) VALUES ('job','Test',3,'source','output',NULL,0)")
+        db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player,performance_key,performance_label) VALUES ('team','job','Rockets / Junior','Rockets_Junior',1,'23','23')")
+        db.executescript((MIGRATIONS / '0009_fast_performance_details.sql').read_text())
+        self.assertEqual(('Rockets / Junior','Rockets_Junior','23',''), db.execute('SELECT name,folder_name,performance_label,details FROM fast_capture_teams').fetchone())
+        self.assertEqual([], db.execute('PRAGMA foreign_key_check').fetchall())
         db.close()

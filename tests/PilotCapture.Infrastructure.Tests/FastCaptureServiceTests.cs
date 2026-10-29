@@ -19,12 +19,12 @@ public sealed class FastCaptureServiceTests
         var image = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
         Assert.False(image.IsPrimary); Assert.Equal(0, image.PlayerNumber);
         Assert.True(File.Exists(image.DeliveredPath));
-        Assert.Equal("Falcons", Path.GetFileName(Path.GetDirectoryName(image.DeliveredPath)));
+        Assert.Equal("001_Falcons", Path.GetFileName(Path.GetDirectoryName(image.DeliveredPath)));
         Assert.True(File.Exists(image.SourcePath));
         Assert.Empty(Directory.GetFiles(env.Root, "*.csv", SearchOption.AllDirectories));
         await env.Service.ReviewAsync(image.Id, true, env.Token);
         var rejected = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
-        Assert.Contains(Path.Combine("Rejects", "Falcons"), rejected.DeliveredPath!);
+        Assert.Contains(Path.Combine("Rejects", "001_Falcons"), rejected.DeliveredPath!);
         Assert.False(File.Exists(image.DeliveredPath)); Assert.True(File.Exists(rejected.DeliveredPath));
         await env.Service.ReviewAsync(image.Id, false, env.Token);
         var restored = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
@@ -39,7 +39,7 @@ public sealed class FastCaptureServiceTests
     {
         await using var env = await Environment.CreateAsync(CaptureJobType.PrintOnSiteTeamAndIndividual);
         await env.Service.NextPlayerAsync(env.JobId, env.Token);
-        Assert.False(Directory.Exists(Path.Combine(env.Root, "individuals", "Falcons", "Player 1")));
+        Assert.False(Directory.Exists(Path.Combine(env.Root, "individuals", "001_Falcons", "Player 1")));
         await env.ShootAsync("first.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
         var first = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
         Assert.True(first.IsPrimary); Assert.Null(first.DeliveredPath);
@@ -47,7 +47,7 @@ public sealed class FastCaptureServiceTests
         await env.ShootAsync("second.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
         var photos = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images;
         var second = photos.Single(x => x.Id != first.Id);
-        Assert.Contains(Path.Combine("Falcons", "Player 1"), second.IndividualDeliveredPath!);
+        Assert.Contains(Path.Combine("001_Falcons", "Player 1"), second.IndividualDeliveredPath!);
         await env.Service.SetPrimaryAsync(second.Id, env.Token);
         photos = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images;
         Assert.Null(photos.Single(x => x.Id == second.Id).DeliveredPath);
@@ -57,7 +57,7 @@ public sealed class FastCaptureServiceTests
         var released = snapshot.Images.Single(x => x.Id == second.Id);
         Assert.EndsWith("_primary.jpg", released.DeliveredPath!); Assert.True(File.Exists(released.DeliveredPath));
         Assert.True(File.Exists(released.IndividualDeliveredPath));
-        Assert.Equal(2, Directory.GetFiles(Path.Combine(env.Root, "individuals", "Falcons", "Player 1"), "*.jpg").Length);
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(env.Root, "individuals", "001_Falcons", "Player 1"), "*.jpg").Length);
         // Both acknowledged copies can be consumed independently without being reissued.
         File.Delete(released.DeliveredPath!); File.Delete(released.IndividualDeliveredPath!);
         await env.Service.ScanAsync(env.JobId, env.Token);
@@ -69,7 +69,7 @@ public sealed class FastCaptureServiceTests
         var restored = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single(x => x.Id == released.Id);
         Assert.True(File.Exists(restored.IndividualDeliveredPath)); Assert.Null(restored.DeliveredPath);
         Assert.Equal(2, Assert.Single(snapshot.Teams).CurrentPlayer); Assert.Equal(new[] { 1 }, snapshot.UsedPlayers);
-        Assert.False(Directory.Exists(Path.Combine(env.Root, "individuals", "Falcons", "Player 2")));
+        Assert.False(Directory.Exists(Path.Combine(env.Root, "individuals", "001_Falcons", "Player 2")));
         await Assert.ThrowsAsync<InvalidOperationException>(() => env.Service.SetPrimaryAsync(first.Id, env.Token));
         await using var restarted = new PilotCaptureDbContext(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(env.Connection).Options);
         var service = new FastCaptureService(restarted, Path.Combine(env.Root, "media"));
@@ -87,9 +87,9 @@ public sealed class FastCaptureServiceTests
         Assert.True(File.Exists(image.IndividualDeliveredPath));
         // A failed team delivery must not recreate an individual copy already consumed.
         File.Delete(image.IndividualDeliveredPath!);
-        File.WriteAllText(Path.Combine(env.Root, "teams", "Falcons"), "blocked folder");
+        File.WriteAllText(Path.Combine(env.Root, "teams", "001_Falcons"), "blocked folder");
         await Assert.ThrowsAsync<IOException>(() => env.Service.NextPlayerAsync(env.JobId, env.Token));
-        File.Delete(Path.Combine(env.Root, "teams", "Falcons"));
+        File.Delete(Path.Combine(env.Root, "teams", "001_Falcons"));
         await env.Service.ScanAsync(env.JobId, env.Token);
         image = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
         Assert.True(File.Exists(image.DeliveredPath)); Assert.False(File.Exists(image.IndividualDeliveredPath));
@@ -171,6 +171,67 @@ public sealed class FastCaptureServiceTests
         await env.Service.IncludeExistingAsync(job, env.Token);
         await env.Service.ScanAsync(job, env.Token);
         Assert.Equal(2, (await env.Service.GetSnapshotAsync(job, env.Token)).Images.Count);
+    }
+
+    [Theory]
+    [InlineData(CaptureJobType.PrintOnSiteTeamsOnly)]
+    [InlineData(CaptureJobType.PrintOnSiteTeamAndIndividual)]
+    [InlineData(CaptureJobType.ActionPhotography)]
+    public async Task Arbitrary_headers_multiple_details_and_numbered_folders_work_in_every_mode(CaptureJobType type)
+    {
+        await using var env = await Environment.CreateAsync(type);
+        var bytes = System.Text.Encoding.UTF8.GetBytes("Event title,notes\r\nBib,Who,Organization,Band,Tier,Extra,Extra\r\n23,Rockets,Club A,Junior,2,keep,this\r\n24,Rockets,Club A,Senior,3,raw,text\r\n23,Rockets,Club B,Junior,2,also,keep\r\n");
+        var command = new FastRosterImportCommand(env.JobId, "unfamiliar.csv", bytes, 1, null, 0, [2,3,4], 2);
+        var result = await env.Service.ImportRosterAsync(command, env.Token);
+        Assert.Equal(3, result.Teams); Assert.Equal(3, result.Rows);
+        var snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        var rockets = snapshot.Teams.Where(t => t.Name == "Rockets").ToArray();
+        Assert.Equal(3, rockets.Length);
+        Assert.Equal(new[] { "23", "23", "24" }, rockets.Select(t => t.PerformanceLabel));
+        Assert.StartsWith("023_Rockets", rockets[0].FolderName); Assert.StartsWith("024_Rockets", rockets[2].FolderName);
+        Assert.Equal(3, rockets.Select(t => t.FolderName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Contains("Band: Junior", rockets[0].Details);
+        Assert.Contains("Organization: Club B", rockets[1].Details);
+        var ids = rockets.Select(t => t.Id).ToArray();
+        var folders = rockets.Select(t => t.FolderName).ToArray();
+        await env.Service.SelectPerformanceAsync(env.JobId, rockets[0].Id, env.Token);
+        await env.ShootAsync("first.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        if (type == CaptureJobType.PrintOnSiteTeamAndIndividual) await env.Service.NextPlayerAsync(env.JobId, env.Token);
+        var image = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        Assert.Equal(rockets[0].FolderName, Path.GetFileName(Path.GetDirectoryName(image.DeliveredPath)));
+        File.Delete(image.DeliveredPath!);
+        await env.Service.ImportRosterAsync(command, env.Token); await env.Service.ScanAsync(env.JobId, env.Token);
+        snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        Assert.Equal(ids, snapshot.Teams.Where(t => t.Name == "Rockets").Select(t => t.Id));
+        Assert.Equal(folders, snapshot.Teams.Where(t => t.Name == "Rockets").Select(t => t.FolderName));
+        Assert.False(File.Exists(image.DeliveredPath));
+        var import = await env.Db.FastRosterImports.FirstAsync(x => x.SourceName == "unfamiliar.csv", env.Token);
+        Assert.Contains("Event title", import.SourceDataJson); Assert.Contains("also", import.SourceDataJson);
+        Assert.Contains("HeaderRecordNumber", import.MappingJson); Assert.Contains("DetailColumns", import.MappingJson);
+    }
+
+    [Fact]
+    public async Task Name_and_order_are_optional_and_legacy_photographed_folders_are_preserved()
+    {
+        await using var env = await Environment.CreateAsync(CaptureJobType.ActionPhotography);
+        var bytes = System.Text.Encoding.UTF8.GetBytes("Something,Other\r\n23,Junior\r\n24,Senior\r\n");
+        await env.Service.ImportRosterAsync(new(env.JobId, "numbers.csv", bytes, null, null, 0), env.Token);
+        var snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        Assert.Equal("Performance 23", snapshot.Teams[0].Name);
+        await env.Service.ImportRosterAsync(new(env.JobId, "nothing-mapped.csv", bytes, null, null, null), env.Token);
+        Assert.Contains((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams, t => t.Name == "Entry 2");
+        var legacy = new FastCaptureTeam { JobId = env.JobId, Name = "Rockets / Junior", FolderName = "Rockets_Junior", PerformanceKey = "23", PerformanceLabel = "23", SortOrder = 9 };
+        env.Db.FastTeams.Add(legacy); await env.Db.SaveChangesAsync(env.Token);
+        await env.Service.SelectPerformanceAsync(env.JobId, legacy.Id, env.Token);
+        await env.ShootAsync("legacy.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var delivered = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images).DeliveredPath;
+        var updated = System.Text.Encoding.UTF8.GetBytes("Run,Squad,Division\r\n23,Rockets,Junior\r\n");
+        await env.Service.ImportRosterAsync(new(env.JobId, "updated.csv", updated, 1, null, 0, [2]), env.Token);
+        snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        var retained = snapshot.Teams.Single(t => t.Id == legacy.Id);
+        Assert.Equal("Rockets", retained.Name); Assert.Equal("Division: Junior", retained.Details);
+        Assert.Equal("Rockets_Junior", retained.FolderName);
+        Assert.Equal(delivered, Assert.Single(snapshot.Images).DeliveredPath); Assert.True(File.Exists(delivered));
     }
 
     private sealed class Environment : IAsyncDisposable

@@ -66,7 +66,7 @@ New jobs record the JPEG source versions present at creation and ignore those ve
 
 ## Hardware correction: shared roster and performance selection
 
-The next hardware report clarified that **all three modes require roster/performance-order import**. “No CSV needed” meant no output CSV, not removing CSV roster input. All three now share Import roster / performance order, editable team/group/order column mapping, ordered team/performance selection and Next team / performance. Selecting an order column sorts numeric values naturally; without it, first appearance in the file defines order. Full source rows, extra/duplicate headers and the confirmed mapping remain in SQLite. Re-importing preserves existing capture IDs and player counters; unlisted prior teams remain after the newly imported schedule so their photos are not lost. Repeated team names with different performance labels are separate selectable entries and share the team's output folder.
+The next hardware report clarified that **all three modes require roster/performance-order import**. “No CSV needed” meant no output CSV, not removing CSV roster input. All three now share Import roster / performance order, per-column optional mapping with sample values, ordered team/performance selection and Next team / performance. Selecting an order column sorts numeric values naturally; without it, first appearance in the file defines order. Full source rows, extra/duplicate headers and the confirmed mapping remain in SQLite. Re-importing preserves existing capture IDs and player counters; unlisted prior teams remain after the newly imported schedule so their photos are not lost. Repeated team names with different performance labels are separate selectable entries with separate numbered performance folders for new captures.
 
 Only Team and Individuals adds a visible grid of **40 numbered player slots under the team name**. Used slots show a checkmark and cannot be selected again; the current slot remains active. Unused slots may be selected directly. Moving away from a used current slot releases its primary. Next Player skips slots already photographed. More slots appear if the team exceeds 40; folders still appear only when images need them.
 
@@ -93,3 +93,27 @@ Hardware checks for this correction:
 - Confirm only the selected primary reaches the team output on Next Player with `_primary.jpg`.
 - Reject a photo with both copies present and verify both are removed and the reject copy appears. A consumed/printed file cannot be recalled.
 - Consume one output, disconnect the other destination, reconnect and verify the consumed delivery is not repeated.
+
+
+## Adaptable CSVs, performance search and numbered folders
+
+The next CAPTURE-10 report requested adaptability to unfamiliar headers, readable review labels, live search and performance-numbered folders.
+
+Import now opens a dedicated CSV mapping window. Each detected column is shown with its original name, a one-based column position and sample values. Duplicate and blank headers are allowed; extra columns beyond the selected header are also available. Choose a logical CSV header record when the file begins with a title/preamble. Quoted multiline cells stay in one logical record. The original raw document, including the preamble, all rows, extra fields and duplicate headers, is preserved alongside the selected header record and mapping.
+
+Each source column can be **Ignore**, **Team name**, **Performance number**, or **Details / division / level**. Known headers suggest a use; every suggestion is editable. Team name and performance number accept at most one column each and are both optional. Any number of detail columns may be included. With no mapped team name, entries are labeled Performance N when an order value exists, otherwise Entry N from the source record number. Without an order column, source first appearance sets order. A mapped but blank team cell is retained in raw data and does not create an empty team. An ignored field remains stored but does not affect selection or duplicate grouping.
+
+Team names and optional detail fields are separate. The identity key includes the performance label and selected detail values, so the same team in multiple divisions/clubs is not collapsed. Search displays performance number, team and labeled details. Typing part of a name, number, club, level or division narrows the list immediately; multiple search words must all match. Typing alone never changes the active capture destination. Select a specific result, or press Enter for a single match. An ambiguous match requires choosing a specific performance. The current active destination stays visible while searching. Next team / performance follows the full schedule, independent of the search filter.
+
+New folders use **performance number + team name**, for example `023_Rockets`. Numeric performance labels are padded to at least three digits; non-numeric labels are sanitized and preserved. Without a performance number, the schedule position is used. Team output, individual output and Rejects use the same performance folder component. A collision adds details, then an ID suffix if needed. Separate performances no longer intentionally share a team folder. The standard player subfolder and primary-copy timing stay unchanged.
+
+Re-import preserves IDs, player counters and photographed performances' existing folder names. No already delivered photo is moved or republished just to adopt the new naming rule. Existing entries with no photographs adopt the new naming on re-import. Existing group-in-name records are matched when possible, retaining their IDs and photographed folder paths. Migration 9 adds the detail text field without rewriting existing delivery state.
+
+The capture layout gives the image list more room and reduces the preview pane. Filenames wrap on their own line; Primary/Rejected and player/sequence/pending status use a separate wrapping line. Selected image status also appears below the closeup. Primary/Reject controls fit at the supported minimum window size. The full-photo tap target is narrower, and the closeup samples a 3:4 portrait area rather than 2:3. These are display changes and do not crop delivered files.
+
+Additional hardware acceptance:
+
+- Import a CSV with unfamiliar, blank or duplicate headers; choose uses by sample data. Select a later header record after a title row. Confirm ignored data remains in import history.
+- Include club, division and level as Details. Search a partial team name and a partial performance number; confirm all matching divisions appear and typing alone does not change capture attribution.
+- Select a result, capture, and confirm numbered folders in team, individual and Rejects output. Re-import after delivery and confirm the existing destination is not reissued.
+- At the laptop's normal scaling and minimum supported window size, verify full filenames, Primary/Rejected labels, touch review buttons and the wider portrait closeup remain visible without overlap.

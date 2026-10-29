@@ -90,7 +90,7 @@ public sealed class MainWindowStartupTests
 
                     // Exercise the fast print screen's real native orientation decode and
                     // shared bitmap, not only the standalone decoder helper.
-                    File.WriteAllBytes(Path.Combine(incoming, "portrait-preview.jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
+                    File.WriteAllBytes(Path.Combine(incoming, "portrait-preview-" + new string('x', 70) + ".jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
                     Complete(controller.ExecuteAsync(service => service.ScanAsync(jobId)));
                     var schedule = new PilotCapture.Application.FastCapture.FastRosterImportCommand(jobId, "schedule.csv",
                         System.Text.Encoding.UTF8.GetBytes("TEAMNAME,ORDER\r\nFalcons,2\r\nBears,1\r\n"), 0, null, 1);
@@ -98,6 +98,16 @@ public sealed class MainWindowStartupTests
                     var fullPreview = portraitFast.FindControl<Image>("Preview")!;
                     var closeup = portraitFast.FindControl<PortraitCropView>("Closeup")!;
                     Assert.NotNull(fullPreview.Source); Assert.Same(fullPreview.Source, closeup.Source);
+                    Assert.Contains("PRIMARY", portraitFast.FindControl<TextBlock>("PreviewImageStatus")!.Text!);
+                    var imageList = portraitFast.FindControl<ListBox>("ImagesList")!;
+                    var previewPhoto = imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single();
+                    var imageRow = Assert.IsType<StackPanel>(imageList.ItemTemplate!.Build(previewPhoto));
+                    imageRow.Measure(new Size(280, double.PositiveInfinity)); imageRow.Arrange(new Rect(0, 0, 280, imageRow.DesiredSize.Height));
+                    var fileLabel = Assert.IsType<TextBlock>(imageRow.Children[0]);
+                    var stateLabel = Assert.IsType<TextBlock>(imageRow.Children[1]);
+                    Assert.Contains(new string('x', 70), fileLabel.Text!);
+                    Assert.Equal(Avalonia.Media.TextWrapping.Wrap, fileLabel.TextWrapping);
+                    Assert.Contains("PRIMARY", stateLabel.Text!); Assert.True(fileLabel.Bounds.Width <= 280);
                     portraitFast.FindControl<Slider>("CloseupZoom")!.Value = 4;
                     closeup.Center = new Point(0.5, 0.4);
                     File.WriteAllBytes(Path.Combine(incoming, "next-portrait.jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
@@ -105,6 +115,45 @@ public sealed class MainWindowStartupTests
                     Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
                     Assert.Same(fullPreview.Source, closeup.Source);
                     Assert.Equal(4, closeup.Zoom); Assert.Equal(new Point(0.5, 0.4), closeup.Center);
+
+                    // All source columns are visible with optional usage choices, including
+                    // unfamiliar names and a title record before the real header.
+                    var adaptable = System.Text.Encoding.UTF8.GetBytes("Event title\r\nRun code,Squad,Age band,Organization,Unused\r\n103,Rockets,Junior,Club A,keep\r\n104,Rockets,Senior,Club A,also keep\r\n105,Stars,Senior,Club B,raw\r\n");
+                    var mapping = new FastRosterMappingWindow(jobId, "custom.csv", adaptable);
+                    mapping.HeaderRow.Value = 2;
+                    Assert.Equal(5, mapping.ColumnUses.Count);
+                    foreach (var use in mapping.ColumnUses.Values) use.SelectedIndex = 0;
+                    mapping.ColumnUses[0].SelectedIndex = 2;
+                    mapping.ColumnUses[1].SelectedIndex = 1;
+                    mapping.ColumnUses[2].SelectedIndex = mapping.ColumnUses[3].SelectedIndex = 3;
+                    var mapped = mapping.BuildCommand();
+                    Assert.Equal(2, mapped.HeaderRecordNumber); Assert.Equal(new[] { 2, 3 }, mapped.DetailColumns);
+                    mapping.ColumnUses[4].SelectedIndex = 1;
+                    Assert.Throws<ArgumentException>(() => mapping.BuildCommand());
+                    mapping.ColumnUses[4].SelectedIndex = 0;
+                    Complete(portraitFast.ImportConfiguredRosterAsync(mapped)); mapping.Close();
+                    var search = portraitFast.FindControl<TextBox>("TeamName")!;
+                    var suggestions = portraitFast.FindControl<ComboBox>("Teams")!;
+                    search.Text = "rock";
+                    Assert.Equal(2, suggestions.Items.Count);
+                    var labels = suggestions.Items.OfType<ComboBoxItem>().Select(i => Assert.IsType<TextBlock>(i.Content).Text!).ToArray();
+                    Assert.Contains(labels, label => label.Contains("Junior")); Assert.Contains(labels, label => label.Contains("Senior"));
+                    Assert.Contains("Bears", portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text!);
+                    search.Text = "104";
+                    Assert.Equal(1, suggestions.Items.Count);
+                    suggestions.SelectedIndex = 0;
+                    PumpUntil(() => search.Text == "" && (portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("104"));
+                    Assert.Contains("Senior", portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text!);
+                    Assert.Equal("Rockets", portraitFast.FindControl<TextBlock>("PlayerTeamName")!.Text);
+                    surface.Measure(new Size(1000, 760)); surface.Arrange(new Rect(0, 0, 1000, 760));
+                    var capture = portraitFast.FindControl<Grid>("CaptureControls")!;
+                    var previewPanel = portraitFast.FindControl<Border>("PreviewPanel")!;
+                    Assert.True(previewPanel.Bounds.X >= capture.Bounds.Right, "Preview must not overlap image filenames / review controls.");
+                    Assert.True(capture.Bounds.Width >= 280);
+                    Assert.True(portraitFast.FindControl<Button>("PrimaryButton")!.Bounds.Width >= 100);
+                    Assert.True(reject.Bounds.Width >= 100);
+                    Assert.True(fullPreview.Bounds.Width <= 80);
+                    Assert.True(closeup.Bounds.Width > fullPreview.Bounds.Width);
 
                     // Exercise the production controller/watcher with an existing copied JPEG
                     // whose timestamp is older than this job. No image decoding in Action mode.
@@ -119,7 +168,7 @@ public sealed class MainWindowStartupTests
                     var photo = Path.Combine(incoming, "copied-old-timestamp.jpg");
                     File.WriteAllBytes(photo, [255,216,255,1]); File.SetLastWriteTimeUtc(photo, DateTime.UtcNow.AddYears(-1));
                     action.FindControl<Button>("MonitorButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-                    PumpUntil(() => Directory.Exists(Path.Combine(ready, "Action team")) && Directory.GetFiles(Path.Combine(ready, "Action team"), "*.jpg").Length == 1);
+                    PumpUntil(() => Directory.Exists(Path.Combine(ready, "001_Action team")) && Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 1);
                     using (var writer = new FileStream(Path.Combine(incoming, "still-writing.jpg"), FileMode.Create, FileAccess.Write, FileShare.Read))
                     {
                         writer.Write(new byte[] { 255, 216, 255, 1 }); writer.Flush();

@@ -22,6 +22,7 @@ public sealed class FastCaptureTeam
     public int SortOrder { get; set; }
     public string PerformanceKey { get; set; } = "";
     public string PerformanceLabel { get; set; } = "";
+    public string Details { get; set; } = "";
 }
 public sealed class FastCaptureImage
 {
