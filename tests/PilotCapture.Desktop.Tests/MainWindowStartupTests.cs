@@ -286,12 +286,17 @@ public sealed class MainWindowStartupTests
                             System.Text.Json.JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = key, CameraKey = camera, PhotoFilename = path, PhotoOrigin = "camera",
                                 PhotoDateCaptured = new DateTime(time).ToString("yyyyMMdd HH:mm:ss.fff") }), DateTime.UtcNow.Ticks)));
                         Metadata(photo, "first-ui", actionStart + TimeSpan.FromSeconds(5).Ticks);
+                        PumpUntil(() => action.FindControl<Button>("MonitorButton")!.IsEnabled);
                         action.FindControl<Button>("MonitorButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-                        PumpUntil(() => Directory.Exists(Path.Combine(ready, "001_Action team")) && Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 1);
+                        PumpUntil(() => actionController.IsRunning,
+                            () => $"Action did not start: {action.FindControl<TextBlock>("Status")!.Text} / {actionController.Error}");
+                        PumpUntil(() => Directory.Exists(Path.Combine(ready, "001_Action team")) && Directory.GetFiles(Path.Combine(ready, "001_Action team"), "*.jpg").Length == 1,
+                            () => $"Action transfer: {actionController.Error} / {action.FindControl<TextBlock>("Status")!.Text} / {action.FindControl<TextBlock>("ActionTransferStatus")!.Text}");
                         using (var writer = new FileStream(Path.Combine(incoming, "still-writing.jpg"), FileMode.Create, FileAccess.Write, FileShare.Read))
                         {
                             writer.Write(new byte[] { 255, 216, 255, 1 }); writer.Flush();
                             Metadata(Path.Combine(incoming, "still-writing.jpg"), "open-ui", actionStart + TimeSpan.FromSeconds(10).Ticks);
+                            PumpUntil(() => action.FindControl<Button>("NextPerformanceButton")!.IsEnabled);
                             action.FindControl<ComboBox>("Teams")!.SelectedIndex = 1;
                             PumpUntil(() => (action.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("Next team"));
                             Assert.Equal(1, action.FindControl<ComboBox>("Teams")!.SelectedIndex);
