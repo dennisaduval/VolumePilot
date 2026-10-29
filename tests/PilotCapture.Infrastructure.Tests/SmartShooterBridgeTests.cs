@@ -108,4 +108,4 @@ public sealed class SmartShooterBridgeTests
 }
 
 [CollectionDefinition("SS transport", DisableParallelization = true)]
-public sealed class SmartShooterTransportCollection;
+public sealed class SmartShooterTransportCollection { }
