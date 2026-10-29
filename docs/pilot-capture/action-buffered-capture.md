@@ -25,7 +25,7 @@ For a successful test, original capture time must arrive within two seconds of t
 
 Samples are per camera and persist as timing history. They apply to captures after verification and expire after two hours unless replaced by another verification. Reconnect/disconnect invalidates future use until reverified. Normal rechecks close the prior interval; a material offset change invalidates its uncertain interval for unassigned images. Already assigned/delivered images are not silently moved. Unobserved manual clock changes between checks cannot be guaranteed detectable immediately; unexpected timing must be reviewed. A computer clock change during a verification invalidates the test.
 
-Resolve the corrected capture interval against saved team changeovers. If its uncertainty crosses different teams, the photo is held. Missing capture time, unknown camera timing, captures before the first boundary, conflicting clock history and missing SS metadata are also held. Do not retroactively apply a new correction to all old buffered images.
+Resolve the corrected capture interval against saved team changeovers. If its uncertainty crosses different teams, the photo is held. Missing capture time, unknown camera timing, captures before the first boundary, conflicting clock history and missing SS metadata are also held. A nonempty PhotoOrigin is required before automatic release so a partial update cannot accidentally publish a still-unmarked verification frame. Do not retroactively apply a new correction to all old buffered images.
 
 ## Queue, storage and recovery
 

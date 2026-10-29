@@ -57,7 +57,7 @@ public sealed class ActionCaptureTests
         await env.Action.EnableAsync(env.Job, t, token); await env.CameraAsync("r6", t, 0);
         await env.Fast.SelectTeamAsync(env.Job, "B", token, t + TimeSpan.FromMinutes(3).Ticks);
         var missing = await env.FileAsync("missing.jpg"); var boundary = await env.FileAsync("boundary.jpg");
-        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "boundary", CameraKey = "r6", PhotoFilename = boundary,
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "boundary", CameraKey = "r6", PhotoFilename = boundary, PhotoOrigin = "camera",
             PhotoDateCaptured = new DateTime(t + TimeSpan.FromMinutes(3).Ticks).ToString("yyyyMMdd HH:mm:ss.fff") }), DateTime.UtcNow.Ticks, token);
         await env.Fast.ScanAsync(env.Job, token);
         Assert.Empty(await env.Db.FastImages.ToListAsync(token));
@@ -109,7 +109,7 @@ public sealed class ActionCaptureTests
         await using var env = await Env.CreateAsync(); var token = TestContext.Current.CancellationToken;
         var t = DateTime.UtcNow.AddMinutes(-10).Ticks; await env.Action.EnableAsync(env.Job, t, token); await env.CameraAsync("r6", t, 0);
         var path = await env.FileAsync("partial.jpg");
-        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "partial", CameraKey = "r6",
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "partial", CameraKey = "r6", PhotoOrigin = "camera",
             PhotoDateCaptured = new DateTime(t + TimeSpan.FromSeconds(10).Ticks).ToString("yyyyMMdd HH:mm:ss.fff") }), t, token);
         await env.Fast.ScanAsync(env.Job, token); Assert.Equal(1, (await env.Action.GetStatusAsync(env.Job, token)).HeldCount);
         await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "partial", PhotoFilename = path, PhotoLocation = "Local Disk" }), t, token);
@@ -137,6 +137,23 @@ public sealed class ActionCaptureTests
         Assert.Equal(old, Assert.Single((await env.Action.GetStatusAsync(env.Job, token)).Held).SourcePath);
     }
 
+    [Fact]
+    public async Task A_clock_frame_with_partial_origin_metadata_is_never_published_as_a_normal_photo()
+    {
+        await using var env = await Env.CreateAsync(); var token = TestContext.Current.CancellationToken;
+        var t = DateTime.UtcNow.AddMinutes(-10).Ticks; await env.Action.EnableAsync(env.Job, t, token); await env.CameraAsync("r6", t, 0);
+        var path = await env.FileAsync("late-origin.jpg");
+        var partial = env.Photo("late-origin", "r6", path, t + TimeSpan.FromSeconds(30).Ticks); partial.Remove("PhotoOrigin"); partial["msg_id"] = "PhotoUpdated";
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(partial), t, token);
+        await env.Fast.ScanAsync(env.Job, token);
+        Assert.Empty(await env.Db.FastImages.ToListAsync(token));
+        Assert.Contains("capture origin", Assert.Single((await env.Action.GetStatusAsync(env.Job, token)).Held).Issue);
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "late-origin", PhotoOrigin = ActionCaptureService.ClockOrigin + "late" }), t, token);
+        await env.Fast.ScanAsync(env.Job, token);
+        Assert.Empty(await env.Db.FastImages.ToListAsync(token));
+        Assert.Equal("Calibration", (await env.Db.ActionReceipts.SingleAsync(token)).State);
+    }
+
     private sealed class Env : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "vp-action-" + Guid.NewGuid().ToString("N"));
@@ -157,7 +174,7 @@ public sealed class ActionCaptureTests
             await e.Fast.SelectTeamAsync(e.Job, "A", e.Token); return e;
         }
         public Dictionary<string, object?> Photo(string key, string camera, string path, long ticks) => new()
-        { ["PhotoKey"] = key, ["CameraKey"] = camera, ["PhotoFilename"] = path, ["PhotoDateCaptured"] = new DateTime(ticks).ToString("yyyyMMdd HH:mm:ss.fff"), ["PhotoLocation"] = "Local Disk" };
+        { ["PhotoKey"] = key, ["CameraKey"] = camera, ["PhotoFilename"] = path, ["PhotoDateCaptured"] = new DateTime(ticks).ToString("yyyyMMdd HH:mm:ss.fff"), ["PhotoLocation"] = "Local Disk", ["PhotoOrigin"] = "camera" };
         public async Task CameraAsync(string camera, long start, long offset)
         {
             await Action.ReceiveSmartShooterAsync(Job, JsonSerializer.Serialize(new { msg_id = "CameraUpdated", CameraKey = camera, CameraName = camera, CameraStatus = "Ready" }), start, Token);

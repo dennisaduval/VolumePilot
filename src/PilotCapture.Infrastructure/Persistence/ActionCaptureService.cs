@@ -236,6 +236,9 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
             if (await db.ActionReceipts.AnyAsync(r => r.JobId == job.Id && r.Id != receipt.Id && r.PhotoKey == photo.PhotoKey, token))
             { receipt.Issue = "Source filename reused; select the correct performance"; continue; }
             if (photo.Origin.StartsWith(ClockOrigin, StringComparison.Ordinal) || clocks.Any(c => c.VerificationPhotoKey == photo.PhotoKey)) { receipt.State = "Calibration"; receipt.Issue = "Clock test: excluded from team output"; continue; }
+            // SS events can be partial. Do not publish a periodic test frame as
+            // an ordinary shot while its identifying PhotoOrigin is still missing.
+            if (string.IsNullOrWhiteSpace(photo.Origin)) { receipt.Issue = "Waiting for SS capture origin"; continue; }
             if (photo.HasConflict) { receipt.Issue = "SS metadata changed identity, path or capture time; select performance"; continue; }
             if (photo.CameraTicks is null) { receipt.Issue = "Missing original capture time"; continue; }
             var match = ActionTimeRouting.Resolve(photo.CameraTicks.Value, clocks.Where(c => c.CameraKey == photo.CameraKey).ToArray(), changes);

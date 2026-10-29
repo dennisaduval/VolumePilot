@@ -279,7 +279,7 @@ public sealed class MainWindowStartupTests
                         var photo = Path.Combine(incoming, "copied-old-timestamp.jpg");
                         File.WriteAllBytes(photo, [255,216,255,1]); File.SetLastWriteTimeUtc(photo, DateTime.UtcNow.AddYears(-1));
                         void Metadata(string path, string key, long time, string camera = "r6-ui") => Complete(actionController.ActionAsync(service => service.ReceiveSmartShooterAsync(jobId,
-                            System.Text.Json.JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = key, CameraKey = camera, PhotoFilename = path,
+                            System.Text.Json.JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = key, CameraKey = camera, PhotoFilename = path, PhotoOrigin = "camera",
                                 PhotoDateCaptured = new DateTime(time).ToString("yyyyMMdd HH:mm:ss.fff") }), DateTime.UtcNow.Ticks)));
                         Metadata(photo, "first-ui", actionStart + TimeSpan.FromSeconds(5).Ticks);
                         action.FindControl<Button>("MonitorButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
