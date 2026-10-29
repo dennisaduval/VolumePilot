@@ -42,9 +42,25 @@ public sealed class PortraitPreviewTests
         Assert.Equal(new Point(0.5,0.25), PortraitCropView.ImagePoint(new Size(200,400), new Size(300,400), new Point(150,100)));
         foreach (var center in new[] { new Point(0,0), new Point(0.5,0.22), new Point(1,1) })
         {
-            var crop = PortraitCropView.CropBounds(new Size(200,400), new Size(300,400), center, 3);
+            var crop = PortraitCropView.CropBounds(new Size(200,400), new Size(400,500), center, 3);
             Assert.True(new Rect(0,0,200,400).Contains(crop));
-            Assert.Equal(0.75, crop.Width / crop.Height, 5);
+            Assert.Equal(0.8, crop.Width / crop.Height, 5);
         }
     }
+    [Theory]
+    [InlineData(300, 800)]
+    [InlineData(800, 300)]
+    [InlineData(400, 500)]
+    public void Rendered_closeup_and_sampled_crop_are_four_by_five_portrait(double width, double height)
+    {
+        var viewport = new Size(width, height);
+        var destination = PortraitCropView.PortraitBounds(viewport);
+        Assert.Equal(4.0 / 5, destination.Width / destination.Height, 6);
+        Assert.True(new Rect(viewport).Contains(destination));
+        Assert.Equal((width - destination.Width) / 2, destination.X, 6);
+        Assert.Equal((height - destination.Height) / 2, destination.Y, 6);
+        var crop = PortraitCropView.CropBounds(new Size(1600,2400), destination.Size, new Point(0.5, 0.22), 3);
+        Assert.Equal(4.0 / 5, crop.Width / crop.Height, 6);
+    }
+
 }

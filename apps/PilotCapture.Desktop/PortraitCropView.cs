@@ -19,11 +19,17 @@ public sealed class PortraitCropView : Control
     {
         base.Render(context);
         if (_source is null || Bounds.Width <= 0 || Bounds.Height <= 0) return;
-        var height = Math.Min(Bounds.Height, Bounds.Width * 4 / 3);
-        var size = new Size(height * 3 / 4, height);
-        var destination = new Rect((Bounds.Width - size.Width) / 2, (Bounds.Height - size.Height) / 2, size.Width, size.Height);
-        var crop = CropBounds(_source.Size, size, _center, _zoom);
+        var destination = PortraitBounds(Bounds.Size);
+        var crop = CropBounds(_source.Size, destination.Size, _center, _zoom);
         context.DrawImage(_source, crop, destination);
+    }
+
+    public static Rect PortraitBounds(Size viewport)
+    {
+        if (viewport.Width <= 0 || viewport.Height <= 0) return default;
+        var height = Math.Min(viewport.Height, viewport.Width * 5 / 4);
+        var width = height * 4 / 5;
+        return new Rect((viewport.Width - width) / 2, (viewport.Height - height) / 2, width, height);
     }
 
     public static Rect CropBounds(Size image, Size viewport, Point center, double zoom)

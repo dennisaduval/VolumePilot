@@ -67,7 +67,12 @@ public sealed partial class FastCaptureWindow : Window
     {
         _jobs = await _controller.ExecuteAsync(s => s.GetJobsAsync(_type));
         _settingChoices = true; SavedJobs.ItemsSource = _jobs.Select(x => x.Name).ToArray(); SavedJobs.SelectedIndex = _jobs.Count > 0 ? 0 : -1; _settingChoices = false;
-        if (_jobs.Count > 0) { _jobId = _jobs[0].Id; await RefreshAsync(); SetupPanel.IsExpanded = false; }
+        if (_jobs.Count > 0)
+        {
+            var jobId = _jobs[0].Id; _jobId = jobId;
+            await RunAsync(() => UsesPlayers ? _controller.ExecuteAsync(s => s.RepairPrimaryFilenameAsync(jobId)) : Task.CompletedTask);
+            SetupPanel.IsExpanded = false;
+        }
     }
     private async Task RefreshAfterActionAsync()
     {
@@ -102,7 +107,7 @@ public sealed partial class FastCaptureWindow : Window
             ImageListTitle.Text = UsesPlayers && team is not null ? $"Player {team.CurrentPlayer} images" : "Incoming images";
             PhotoCount.Text = UsesPlayers && team is not null ? $"{_snapshot.Images.Count} image(s) · Player {team.CurrentPlayer}" : $"{_snapshot.Images.Count} recent image(s)";
             var signature = job.CurrentTeamId + ":" + (UsesPlayers ? team?.CurrentPlayer : 0) + "|" +
-                string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}"));
+                string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}:{x.IndividualDeliveredPath}:{x.DeliveredPath}"));
             if (_displaySignature != signature)
             {
                 _displaySignature = signature;
@@ -190,7 +195,12 @@ public sealed partial class FastCaptureWindow : Window
     private async void OnSavedJobChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_settingChoices || SavedJobs.SelectedIndex < 0) return;
-        await RunAsync(async () => { await _controller.StopAsync(); _jobId = _jobs[SavedJobs.SelectedIndex].Id; _displaySignature = null; ClearTeamSearch(); });
+        var jobId = _jobs[SavedJobs.SelectedIndex].Id;
+        await RunAsync(async () =>
+        {
+            await _controller.StopAsync(); _jobId = jobId; _displaySignature = null; ClearTeamSearch();
+            if (UsesPlayers) await _controller.ExecuteAsync(s => s.RepairPrimaryFilenameAsync(jobId));
+        });
     }
     private async void OnNewJobClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
@@ -286,10 +296,12 @@ public sealed partial class FastCaptureWindow : Window
     private static Control ImageRow(FastCaptureImage image)
     {
         var row = new StackPanel { Spacing = 4, Margin = new Thickness(0, 6) };
-        row.Children.Add(new TextBlock { Text = Path.GetFileName(image.SourcePath), TextWrapping = TextWrapping.Wrap, FontSize = 17 });
+        var output = image.IndividualDeliveredPath ?? image.DeliveredPath;
+        row.Children.Add(new TextBlock { Text = output is null ? "Awaiting output" : Path.GetFileName(output), TextWrapping = TextWrapping.Wrap, FontSize = 17 });
+        row.Children.Add(new TextBlock { Text = "Camera: " + Path.GetFileName(image.SourcePath), TextWrapping = TextWrapping.Wrap, FontSize = 14 });
         row.Children.Add(new TextBlock { Text = ImageState(image), TextWrapping = TextWrapping.Wrap, FontSize = 15,
             FontWeight = FontWeight.SemiBold, Foreground = image.IsRejected ? Brushes.Firebrick : Brushes.DarkBlue });
-        ToolTip.SetTip(row, Path.GetFileName(image.SourcePath));
+        ToolTip.SetTip(row, (output ?? "No output copy acknowledged yet") + "\nCamera: " + Path.GetFileName(image.SourcePath));
         return row;
     }
     private async void OnMonitorClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>

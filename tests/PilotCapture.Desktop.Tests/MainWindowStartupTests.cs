@@ -105,8 +105,11 @@ public sealed class MainWindowStartupTests
                     var imageRow = Assert.IsType<StackPanel>(imageList.ItemTemplate!.Build(previewPhoto));
                     imageRow.Measure(new Size(280, double.PositiveInfinity)); imageRow.Arrange(new Rect(0, 0, 280, imageRow.DesiredSize.Height));
                     var fileLabel = Assert.IsType<TextBlock>(imageRow.Children[0]);
-                    var stateLabel = Assert.IsType<TextBlock>(imageRow.Children[1]);
-                    Assert.Contains(new string('x', 70), fileLabel.Text!);
+                    var cameraLabel = Assert.IsType<TextBlock>(imageRow.Children[1]);
+                    var stateLabel = Assert.IsType<TextBlock>(imageRow.Children[2]);
+                    Assert.EndsWith("_Primary.jpg", fileLabel.Text!);
+                    Assert.True(File.Exists(previewPhoto.IndividualDeliveredPath));
+                    Assert.Contains(new string('x', 70), cameraLabel.Text!);
                     Assert.Equal(Avalonia.Media.TextWrapping.Wrap, fileLabel.TextWrapping);
                     Assert.Contains("PRIMARY", stateLabel.Text!); Assert.True(fileLabel.Bounds.Width <= 280);
                     portraitFast.FindControl<Slider>("CloseupZoom")!.Value = 4;

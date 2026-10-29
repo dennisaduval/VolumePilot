@@ -109,7 +109,7 @@ New folders use **performance number + team name**, for example `023_Rockets`. N
 
 Re-import preserves IDs, player counters and photographed performances' existing folder names. No already delivered photo is moved or republished just to adopt the new naming rule. Existing entries with no photographs adopt the new naming on re-import. Existing group-in-name records are matched when possible, retaining their IDs and photographed folder paths. Migration 9 adds the detail text field without rewriting existing delivery state.
 
-The capture layout gives the image list more room and reduces the preview pane. Filenames wrap on their own line; Primary/Rejected and player/sequence/pending status use a separate wrapping line. Selected image status also appears below the closeup. Primary/Reject controls fit at the supported minimum window size. The full-photo tap target is narrower, and the closeup samples a 3:4 portrait area rather than 2:3. These are display changes and do not crop delivered files.
+The capture layout gives the image list more room and reduces the preview pane. Filenames wrap on their own line; Primary/Rejected and player/sequence/pending status use a separate wrapping line. Selected image status also appears below the closeup. Primary/Reject controls fit at the supported minimum window size. The full-photo tap target is narrower, and the closeup samples a 4:5 portrait area. These are display changes and do not crop delivered files.
 
 Additional hardware acceptance:
 
@@ -139,3 +139,14 @@ Acceptance:
 - Reopen Player 1, add shots and verify its primary stays selected until explicitly changed. Choose a different old/new shot as primary and check both the suffix and the delayed team copy.
 - Verify a single present `_Primary.jpg` copy in each player's individual folder, checkmarked revisit buttons, restart persistence and Next Player skipping used slots.
 - Consume a delivery, revisit without changing primary and confirm it is not reissued. Upgrade an existing job and verify marker-only reconciliation renames present copies without recreating consumed copies.
+
+
+## Filename display/repair and 4:5 closeup correction
+
+The next hardware report still showed a missing primary suffix and requested a 4:5 portrait closeup. The prior image list displayed the original camera filename, which does not change when an individual copy is renamed. Rows now show the acknowledged outgoing individual/reject filename first, the original camera filename on a separately labeled line, and the role/status line. Refresh signatures include delivery paths so a filename-only repair is reflected immediately.
+
+Opening/resuming a print job, selecting a player/performance, or pressing Primary for an already selected primary reconciles the selected player's individual filename. This covers older unmarked delivery acknowledgements and a bare physical copy left behind even when SQLite already acknowledges the marked path. The shared delivery reconciler validates file ownership, renames the existing bare copy, and removes an owned duplicate if both names are present. Consumed copies are not recreated. Repair does not reset completion/release state or republish a team primary. An unavailable destination or differing bytes produces a visible error; originals remain intact. No new database migration is needed for this per-player repair.
+
+The closeup's actual drawing rectangle and sampled crop now use **4:5 portrait** at every viewport size, with centered letterboxing when needed. It remains a display-only crop of the shared decoded portrait.
+
+Acceptance: open an older player and inspect the actual individual output folder for `_Primary.jpg`; compare the filename shown on screen with that file and the separately labeled camera source. Check both a new primary and an existing bare copy, and verify a consumed team/individual copy is not recreated by repair. Confirm the closeup is 4:5 at normal and minimum window sizes.

@@ -64,7 +64,11 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         var matches = await db.FastTeams.Where(x => x.JobId == jobId && x.Name == name.Trim()).OrderBy(x => x.SortOrder).ToListAsync(token);
         if (matches.Count > 1) throw new ArgumentException("Several performances use that team name. Select a specific performance / division.");
         var team = matches.SingleOrDefault();
-        if (team is not null && team.Id == job.CurrentTeamId) return;
+        if (team is not null && team.Id == job.CurrentTeamId)
+        {
+            if (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual) await RepairPrimaryFilenameAsync(jobId, token);
+            return;
+        }
         if (job.CurrentTeamId is not null && job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual)
             await NextPlayerAsync(jobId, token);
         if (team is null)
@@ -103,7 +107,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         var team = await db.FastTeams.SingleAsync(x => x.Id == image.TeamId, token);
         if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual || job.CurrentTeamId != image.TeamId || team.CurrentPlayer != image.PlayerNumber)
             throw new InvalidOperationException("Select that player before changing their primary image.");
-        if (image.IsPrimary && !image.IsRejected) return;
+        if (image.IsPrimary && !image.IsRejected) { await RepairPrimaryFilenameAsync(job.Id, token); return; }
         await using var tx = await db.Database.BeginTransactionAsync(token);
         var images = await db.FastImages.Where(x => x.TeamId == image.TeamId && x.PlayerNumber == image.PlayerNumber).ToListAsync(token);
         foreach (var photo in images) { photo.IsPrimary = false; photo.NeedsDelivery = true; }
@@ -195,10 +199,15 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching performances.");
         var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
         if (!await db.FastTeams.AnyAsync(x => x.Id == teamId && x.JobId == jobId, token)) throw new ArgumentException("Choose a performance from this job.");
-        if (job.CurrentTeamId == teamId) return;
+        if (job.CurrentTeamId == teamId)
+        {
+            if (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual) await RepairPrimaryFilenameAsync(jobId, token);
+            return;
+        }
         if (job.CurrentTeamId is not null && job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual) await NextPlayerAsync(jobId, token);
         job.CurrentTeamId = teamId;
         await db.SaveChangesAsync(token);
+        if (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual) await RepairPrimaryFilenameAsync(jobId, token);
     }
 
     public async Task SelectPlayerAsync(string jobId, int player, CancellationToken token = default)
@@ -208,9 +217,25 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual) throw new InvalidOperationException("This job does not use player slots.");
         if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching players.");
         var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
-        if (team.CurrentPlayer == player) return;
+        if (team.CurrentPlayer == player) { await RepairPrimaryFilenameAsync(jobId, token); return; }
         await NextPlayerAsync(jobId, token);
         team.CurrentPlayer = player;
+        await db.SaveChangesAsync(token);
+        await RepairPrimaryFilenameAsync(jobId, token);
+    }
+
+    public async Task RepairPrimaryFilenameAsync(string jobId, CancellationToken token = default)
+    {
+        var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
+        if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual || job.CurrentTeamId is null) return;
+        var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
+        var primary = await db.FastImages.SingleOrDefaultAsync(x => x.TeamId == team.Id && x.PlayerNumber == team.CurrentPlayer && x.IsPrimary && !x.IsRejected, token);
+        if (primary is null) return;
+        if (!Directory.Exists(job.IndividualsFolder)) throw new IOException("Individual output is unavailable; primary filename repair remains pending.");
+        // Repair only the selected player's individual copy. Do not alter release
+        // state or republish the team copy while an operator is reviewing a player.
+        primary.IndividualDeliveredPath = await ReconcileCopyAsync(primary, primary.IndividualDeliveredPath,
+            IndividualTarget(job, team, primary), token, job.IndividualsFolder);
         await db.SaveChangesAsync(token);
     }
 
@@ -309,8 +334,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         foreach (var image in images)
         {
             var team = teams[image.TeamId];
-            var player = image.PlayerNumber > 0 ? $"_Player_{image.PlayerNumber:000}" : "";
-            var stem = $"{team.FolderName}{player}_{image.Sequence:000000}_{image.Id}";
+            var stem = ImageStem(team, image);
             string? target;
             if (image.IsRejected) target = Path.Combine(RejectRoot(job.OutputFolder), team.FolderName, stem + ".jpg");
             else if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual)
@@ -321,7 +345,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
             // The individual primary is marked immediately. The team copy still
             // waits until the operator completes/leaves this player.
             var individual = job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual && !image.IsRejected
-                ? Path.Combine(job.IndividualsFolder!, team.FolderName, $"Player {image.PlayerNumber}", stem + (image.IsPrimary ? "_Primary" : "") + ".jpg") : null;
+                ? IndividualTarget(job, team, image) : null;
             image.IndividualDeliveredPath = await ReconcileCopyAsync(image, image.IndividualDeliveredPath, individual, token, job.IndividualsFolder);
             await db.SaveChangesAsync(token); // Acknowledge this destination independently.
             image.DeliveredPath = await ReconcileCopyAsync(image, image.DeliveredPath, target, token);
@@ -330,10 +354,26 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         }
     }
 
+    private static string ImageStem(FastCaptureTeam team, FastCaptureImage image) =>
+        $"{team.FolderName}{(image.PlayerNumber > 0 ? $"_Player_{image.PlayerNumber:000}" : "")}_{image.Sequence:000000}_{image.Id}";
+    private static string IndividualTarget(FastCaptureJob job, FastCaptureTeam team, FastCaptureImage image) =>
+        Path.Combine(job.IndividualsFolder!, team.FolderName, $"Player {image.PlayerNumber}", ImageStem(team, image) + (image.IsPrimary ? "_Primary" : "") + ".jpg");
+
     private static async Task<string?> ReconcileCopyAsync(FastCaptureImage image, string? previous, string? target, CancellationToken token, string? destinationRoot = null)
     {
         // An acknowledged same-path copy may have been consumed. Do not publish it again.
-        if (string.Equals(target, previous, StringComparison.OrdinalIgnoreCase)) return target;
+        if (string.Equals(target, previous, StringComparison.OrdinalIgnoreCase))
+        {
+            // Older installations can acknowledge the marked name while a bare copy
+            // remains on disk. Reconcile that owned file, without restoring a consumed copy.
+            if (destinationRoot is not null && target is not null && image.IsPrimary)
+            {
+                var bare = Path.Combine(Path.GetDirectoryName(target)!, WithoutPrimaryMarker(target) + Path.GetExtension(target));
+                if (!string.Equals(bare, target, StringComparison.OrdinalIgnoreCase) && File.Exists(bare))
+                    return await ReconcileCopyAsync(image, bare, target, token, destinationRoot);
+            }
+            return target;
+        }
         // Role-only filename changes rename a still-present copy atomically. If
         // a watcher already consumed it, update the acknowledgement without reissuing it.
         if (target is not null && previous is not null &&

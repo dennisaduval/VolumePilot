@@ -352,6 +352,39 @@ public sealed class FastCaptureServiceTests
         Assert.DoesNotContain("_Primary.jpg", old.IndividualDeliveredPath!); Assert.False(File.Exists(old.IndividualDeliveredPath));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Opening_a_player_repairs_a_bare_primary_on_disk_even_if_its_acknowledgement_already_has_the_marker(bool acknowledgedMarked)
+    {
+        await using var env = await Environment.CreateAsync(CaptureJobType.PrintOnSiteTeamAndIndividual);
+        await env.ShootAsync("camera.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        await env.Service.NextPlayerAsync(env.JobId, env.Token);
+        var photo = await env.Db.FastImages.SingleAsync(env.Token);
+        var marked = photo.IndividualDeliveredPath!;
+        var bare = marked[..^"_Primary.jpg".Length] + ".jpg";
+        File.Move(marked, bare);
+        photo.IndividualDeliveredPath = acknowledgedMarked ? marked : bare;
+        photo.NeedsDelivery = false;
+        await env.Db.SaveChangesAsync(env.Token);
+        File.Delete(photo.DeliveredPath!); // A repair must never repeat the team delivery.
+        await env.Service.SelectPlayerAsync(env.JobId, 1, env.Token);
+        var current = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        Assert.Equal(marked, current.IndividualDeliveredPath);
+        Assert.True(File.Exists(marked)); Assert.False(File.Exists(bare)); Assert.False(File.Exists(current.DeliveredPath));
+        Assert.True(current.IsPrimary); Assert.True(current.Released);
+        Assert.Equal(await File.ReadAllBytesAsync(current.StoredPath, env.Token), await File.ReadAllBytesAsync(marked, env.Token));
+        // Pressing Primary again repairs a late bare copy, including an owned duplicate.
+        File.Copy(marked, bare);
+        await env.Service.SetPrimaryAsync(current.Id, env.Token);
+        Assert.True(File.Exists(marked)); Assert.False(File.Exists(bare));
+        // Consumed copies stay consumed, even during explicit marker reconciliation.
+        File.Delete(marked);
+        await env.Service.RepairPrimaryFilenameAsync(env.JobId, env.Token);
+        await env.Service.SetPrimaryAsync(current.Id, env.Token);
+        Assert.False(File.Exists(marked)); Assert.False(File.Exists(bare)); Assert.False(File.Exists(current.DeliveredPath));
+    }
+
     private sealed class Environment : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "vp-fast-" + Guid.NewGuid().ToString("N"));

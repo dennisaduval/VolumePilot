@@ -16,5 +16,6 @@ public interface IFastCaptureService
     Task NextPlayerAsync(string jobId, CancellationToken token = default);
     Task ReviewAsync(string imageId, bool reject, CancellationToken token = default);
     Task SetPrimaryAsync(string imageId, CancellationToken token = default);
+    Task RepairPrimaryFilenameAsync(string jobId, CancellationToken token = default);
     Task<bool> ScanAsync(string jobId, CancellationToken token = default);
 }
