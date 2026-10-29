@@ -21,6 +21,7 @@ public sealed partial class FastCaptureWindow : Window
     private IReadOnlyList<FastCaptureJob> _jobs = [];
     private FastCaptureSnapshot? _snapshot;
     private bool _busy, _refreshing, _settingChoices, _closed;
+    private bool _reviewBusy;
     private TaskCompletionSource<bool>? _refreshCompletion;
     private string? _jobId, _displayedImageId, _displaySignature, _actionError;
     private Bitmap? _bitmap;
@@ -152,7 +153,7 @@ public sealed partial class FastCaptureWindow : Window
         MonitorButton.IsEnabled = !_busy && _jobId is not null && _snapshot?.Job.CurrentTeamId is not null && (!_controller.ActionMode || _snapshot.Job.ActionTimingEnabled);
         NextPlayerButton.IsEnabled = !_busy && _snapshot?.Job.CurrentTeamId is not null;
         PrimaryButton.IsEnabled = !_busy && UsesPlayers && SelectedImage() is not null;
-        RejectButton.IsEnabled = !_busy && SelectedImage() is not null;
+        RejectButton.IsEnabled = !_busy && !_reviewBusy && SelectedImage() is not null;
         RejectButton.Content = SelectedImage()?.IsRejected == true ? "Restore" : "Reject";
         PreviewImageStatus.Text = SelectedImage() is { } selected ? ImageState(selected) : "No image selected";
         SaveJobButton.IsEnabled = !_busy && _jobId is null;
@@ -400,8 +401,21 @@ public sealed partial class FastCaptureWindow : Window
     { if (_jobId is not null) await _controller.ExecuteAsync(s => s.NextPlayerAsync(_jobId)); });
     private async void OnPrimaryClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     { if (SelectedImage() is { } image) await _controller.ExecuteAsync(s => s.SetPrimaryAsync(image.Id)); });
-    private async void OnRejectClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
-    { if (SelectedImage() is { } image) await _controller.ExecuteAsync(s => s.ReviewAsync(image.Id, !image.IsRejected)); });
+    private async void OnRejectClick(object? sender, RoutedEventArgs e)
+    {
+        if (SelectedImage() is not { } image || _reviewBusy) return;
+        if (!_controller.ActionMode)
+        {
+            await RunAsync(() => _controller.ReviewImageAsync(image.Id, !image.IsRejected));
+            return;
+        }
+        // An Action reject can wait behind file delivery, but must not disable
+        // the next-performance controls or delay recording their timestamps.
+        _reviewBusy = true; UpdateButtons();
+        try { await _controller.ReviewImageAsync(image.Id, !image.IsRejected); }
+        catch (Exception ex) { _actionError = ex.Message; }
+        finally { _reviewBusy = false; await RefreshAfterActionAsync(); UpdateButtons(); }
+    }
     private async void OnImageChanged(object? sender, SelectionChangedEventArgs e)
     { if (!_settingChoices) { try { await ShowPreviewAsync(); UpdateButtons(); } catch (Exception ex) { Status.Text = ex.Message; } } }
     public async Task StopCaptureAsync()

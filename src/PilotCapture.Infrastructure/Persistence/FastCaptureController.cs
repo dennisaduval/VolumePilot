@@ -43,6 +43,12 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
         }
         finally { _actionFiles.Release(); }
     }
+    public async Task ReviewImageAsync(string imageId, bool reject)
+    {
+        if (ActionMode) await _actionFiles.WaitAsync();
+        try { await ExecuteAsync(s => s.ReviewAsync(imageId, reject)); }
+        finally { if (ActionMode) _actionFiles.Release(); }
+    }
     public string? Error { get; private set; }
     public bool IsRunning => _watchTask is { IsCompleted: false };
     public async Task<T> ExecuteAsync<T>(Func<IFastCaptureService, Task<T>> action)

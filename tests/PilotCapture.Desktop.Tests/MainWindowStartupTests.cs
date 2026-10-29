@@ -317,6 +317,16 @@ public sealed class MainWindowStartupTests
                         Complete(action.ImportConfiguredRosterAsync(actionSchedule));
                         Assert.Contains("1 held", action.FindControl<TextBlock>("ActionTransferStatus")!.Text!);
                         Assert.Single(Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg"));
+                        var actionReject = action.FindControl<Button>("RejectButton")!;
+                        actionReject.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                        Assert.True(action.FindControl<Button>("NextPerformanceButton")!.IsEnabled);
+                        PumpUntil(() => (action.FindControl<TextBlock>("PreviewImageStatus")!.Text ?? "").Contains("REJECTED"));
+                        Assert.Empty(Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg"));
+                        Assert.Single(Directory.GetFiles(Path.Combine(root, "Rejects", "002_Next team"), "*.jpg"));
+                        actionReject.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                        PumpUntil(() => actionReject.Content as string == "Reject");
+                        Assert.Single(Directory.GetFiles(Path.Combine(ready, "002_Next team"), "*.jpg"));
+                        Assert.Empty(Directory.GetFiles(Path.Combine(root, "Rejects", "002_Next team"), "*.jpg"));
                     }
                     finally { Complete(action.StopCaptureAsync()); action.Close(); controller.Dispose(); }
 
