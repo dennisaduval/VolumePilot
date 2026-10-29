@@ -103,6 +103,40 @@ public sealed class ActionCaptureTests
         await env.Fast.ScanAsync(env.Job, token); Assert.Equal(1, (await env.Action.GetStatusAsync(env.Job, token)).HeldCount);
     }
 
+    [Fact]
+    public async Task Partial_SS_updates_are_merged_and_reused_paths_are_held_instead_of_reusing_old_identity()
+    {
+        await using var env = await Env.CreateAsync(); var token = TestContext.Current.CancellationToken;
+        var t = DateTime.UtcNow.AddMinutes(-10).Ticks; await env.Action.EnableAsync(env.Job, t, token); await env.CameraAsync("r6", t, 0);
+        var path = await env.FileAsync("partial.jpg");
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "partial", CameraKey = "r6",
+            PhotoDateCaptured = new DateTime(t + TimeSpan.FromSeconds(10).Ticks).ToString("yyyyMMdd HH:mm:ss.fff") }), t, token);
+        await env.Fast.ScanAsync(env.Job, token); Assert.Equal(1, (await env.Action.GetStatusAsync(env.Job, token)).HeldCount);
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "PhotoUpdated", PhotoKey = "partial", PhotoFilename = path, PhotoLocation = "Local Disk" }), t, token);
+        await env.Fast.ScanAsync(env.Job, token); Assert.Single(await env.Db.FastImages.ToListAsync(token));
+        var timestamp = File.GetLastWriteTimeUtc(path); await File.WriteAllBytesAsync(path, [255,216,255,2], token); File.SetLastWriteTimeUtc(path, timestamp.AddSeconds(1));
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "Synchronise", PhotoInfo = new[] { env.Photo("reused", "r6", path, t + TimeSpan.FromSeconds(20).Ticks) } }), t, token);
+        await env.Fast.ScanAsync(env.Job, token);
+        Assert.Single(await env.Db.FastImages.ToListAsync(token)); Assert.Equal(1, (await env.Action.GetStatusAsync(env.Job, token)).HeldCount);
+        Assert.Contains("multiple", (await env.Action.GetStatusAsync(env.Job, token)).Held[0].Issue);
+    }
+
+    [Fact]
+    public async Task A_material_clock_change_does_not_reinterpret_unassigned_old_frames_with_the_new_offset()
+    {
+        await using var env = await Env.CreateAsync(); var token = TestContext.Current.CancellationToken;
+        var t = DateTime.UtcNow.AddMinutes(-10).Ticks; await env.Action.EnableAsync(env.Job, t, token); await env.CameraAsync("r6", t, 0);
+        var shifted = env.Photo("new-clock", "r6", "", t + TimeSpan.FromSeconds(90).Ticks); shifted["PhotoOrigin"] = ActionCaptureService.ClockOrigin + "new";
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "Synchronise", PhotoInfo = new[] { shifted } }), t, token);
+        await env.Action.VerifyClockAsync(env.Job, "new-clock", t + TimeSpan.FromMinutes(2).Ticks, t + TimeSpan.FromMinutes(2).Ticks + TimeSpan.FromMilliseconds(100).Ticks, token);
+        var old = await env.FileAsync("uncertain-old.jpg"); var current = await env.FileAsync("verified-new.jpg");
+        await env.Action.ReceiveSmartShooterAsync(env.Job, JsonSerializer.Serialize(new { msg_id = "Synchronise", PhotoInfo = new[] {
+            env.Photo("old", "r6", old, t + TimeSpan.FromSeconds(60).Ticks), env.Photo("new", "r6", current, t + TimeSpan.FromSeconds(100).Ticks) } }), t, token);
+        await env.Fast.ScanAsync(env.Job, token);
+        Assert.Equal(current, (await env.Db.FastImages.SingleAsync(token)).SourcePath);
+        Assert.Equal(old, Assert.Single((await env.Action.GetStatusAsync(env.Job, token)).Held).SourcePath);
+    }
+
     private sealed class Env : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "vp-action-" + Guid.NewGuid().ToString("N"));

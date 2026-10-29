@@ -39,8 +39,7 @@ public sealed class ActionHeldWindow : Window
             assign.IsEnabled = false;
             try
             {
-                foreach (var id in selected) await controller.ActionAsync(s => s.AssignHeldAsync(snapshot.Job.Id, id, teamId));
-                await controller.ExecuteAsync(s => s.ScanAsync(snapshot.Job.Id, actionPaths: []));
+                await controller.AssignActionPhotosAsync(snapshot.Job.Id, selected, teamId);
                 await Refresh();
             }
             catch (Exception ex) { label.Text = ex.Message; }

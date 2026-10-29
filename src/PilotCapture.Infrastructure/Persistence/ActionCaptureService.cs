@@ -140,7 +140,7 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
         var teams = await db.FastTeams.AsNoTracking().Where(t => t.JobId == jobId).ToDictionaryAsync(t => t.Id, token);
         var counts = await db.FastImages.AsNoTracking().Where(p => p.JobId == jobId).GroupBy(p => new { p.TeamId, p.NeedsDelivery })
             .Select(g => new { g.Key.TeamId, g.Key.NeedsDelivery, Count = g.Count() }).ToListAsync(token);
-        var progress = counts.GroupBy(c => c.TeamId).Select(g => new ActionTeamProgress(teams[g.Key].Name,
+        var progress = counts.GroupBy(c => c.TeamId).Select(g => new ActionTeamProgress(g.Key, $"{teams[g.Key].Day} {teams[g.Key].Hall} · {FastPerformanceSearch.Label(teams[g.Key])}".Trim(),
             g.Sum(c => c.Count), g.Where(c => c.NeedsDelivery).Sum(c => c.Count), g.Where(c => !c.NeedsDelivery).Sum(c => c.Count))).ToArray();
         return new(await db.ActionCameras.AsNoTracking().Where(c => c.JobId == jobId).OrderBy(c => c.Name).ToListAsync(token),
             await db.ActionClockSamples.AsNoTracking().Where(c => c.JobId == jobId).ToListAsync(token),
@@ -183,6 +183,7 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
         var ignored = job.IgnoredSourceVersionsJson is { } baseline ? JsonSerializer.Deserialize<HashSet<string>>(baseline)! : [];
         var files = incoming
             .Select(p => new FileInfo(p)).Where(f => !known.Contains($"{PathKey(f.FullName)}|{f.LastWriteTimeUtc.Ticks}|{f.Length}")
+                && (job.IgnoredSourceVersionsJson is not null || f.LastWriteTimeUtc.Ticks >= job.StartedAtTicks)
                 && !ignored.Contains($"{PathKey(f.FullName)}|{f.LastWriteTimeUtc.Ticks}|{f.Length}"))
             .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Take(9).ToArray();
         var settled = files.Length <= 8;

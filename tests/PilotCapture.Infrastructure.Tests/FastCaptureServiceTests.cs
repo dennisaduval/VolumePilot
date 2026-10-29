@@ -332,7 +332,7 @@ public sealed class FastCaptureServiceTests
         }
         await env.Db.SaveChangesAsync(env.Token);
         // Reconstruct the version-9 schema before exercising the real upgrade path.
-        await env.Db.Database.ExecuteSqlRawAsync("DELETE FROM schema_migrations WHERE version >= 10; DROP TABLE action_receipts; DROP TABLE action_photo_metadata; DROP TABLE action_clock_samples; DROP TABLE action_cameras; DROP TABLE action_changeovers; ALTER TABLE fast_capture_jobs DROP COLUMN action_timing_enabled; DROP INDEX ix_fast_pending_delivery; DROP INDEX ix_fast_capture_teams_schedule; ALTER TABLE fast_capture_teams DROP COLUMN day; ALTER TABLE fast_capture_teams DROP COLUMN hall;", env.Token);
+        await env.Db.Database.ExecuteSqlRawAsync("DELETE FROM schema_migrations WHERE version >= 10; DROP TABLE action_receipts; DROP TABLE action_photo_metadata; DROP TABLE action_clock_samples; DROP TABLE action_cameras; DROP TABLE action_changeovers; ALTER TABLE fast_capture_jobs DROP COLUMN action_timing_enabled; DROP INDEX ix_fast_pending_delivery; DROP INDEX ix_fast_action_progress; DROP INDEX ix_fast_capture_teams_schedule; ALTER TABLE fast_capture_teams DROP COLUMN day; ALTER TABLE fast_capture_teams DROP COLUMN hall;", env.Token);
         await using var upgraded = new PilotCaptureDbContext(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(env.Connection).Options);
         await new DatabaseInitializer(upgraded).InitializeAsync(env.Token);
         var service = new FastCaptureService(upgraded, Path.Combine(env.Root, "media"));

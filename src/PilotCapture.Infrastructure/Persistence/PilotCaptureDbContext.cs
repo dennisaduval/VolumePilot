@@ -210,7 +210,12 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
         });
 
         modelBuilder.Entity<FastCaptureJob>(e => { e.ToTable("fast_capture_jobs"); e.HasKey(x => x.Id); });
-        modelBuilder.Entity<ActionChangeover>(e => { e.ToTable("action_changeovers"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.UtcTicks }); });
+        modelBuilder.Entity<ActionChangeover>(e =>
+        {
+            e.ToTable("action_changeovers"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.UtcTicks });
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<FastCaptureTeam>().WithMany().HasForeignKey(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<ActionCamera>(e => { e.ToTable("action_cameras"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.CameraKey }).IsUnique(); });
         modelBuilder.Entity<ActionClockSample>(e => { e.ToTable("action_clock_samples"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.VerificationPhotoKey }).IsUnique(); });
         modelBuilder.Entity<ActionPhotoMetadata>(e => { e.ToTable("action_photo_metadata"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.PhotoKey }).IsUnique(); e.HasIndex(x => new { x.JobId, x.PathKey }); });

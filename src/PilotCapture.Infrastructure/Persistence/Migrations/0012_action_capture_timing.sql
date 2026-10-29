@@ -13,3 +13,4 @@ CREATE UNIQUE INDEX ix_action_receipt_source ON action_receipts(job_id,path_key,
 CREATE INDEX ix_action_receipt_state ON action_receipts(job_id,state);
 CREATE INDEX ix_action_receipt_photo ON action_receipts(job_id,photo_key);
 CREATE INDEX ix_fast_pending_delivery ON fast_capture_images(job_id,needs_delivery,id);
+CREATE INDEX ix_fast_action_progress ON fast_capture_images(job_id,team_id,needs_delivery);

@@ -151,7 +151,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         {
             var settledAction = await new ActionCaptureService(db, mediaRoot).ScanAsync(job, token, actionPaths);
             await DeliverAsync(job, token);
-            return settledAction;
+            return settledAction && !await db.FastImages.AnyAsync(i => i.JobId == jobId && i.NeedsDelivery, token);
         }
         var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
         var settled = true;

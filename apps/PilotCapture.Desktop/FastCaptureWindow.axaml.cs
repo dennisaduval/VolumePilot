@@ -30,6 +30,8 @@ public sealed partial class FastCaptureWindow : Window
     private string? _slotSignature;
     private IReadOnlyList<FastCaptureTeam> _visibleTeams = [];
     private string? _scheduleSignature;
+    private string? _actionProgressJob;
+    private DateTime _nextActionRefresh;
     public event Action? ReturnRequested;
     private bool UsesPlayers => _type == CaptureJobType.PrintOnSiteTeamAndIndividual;
     public FastCaptureWindow(CaptureJobType type, FastCaptureController controller)
@@ -109,17 +111,20 @@ public sealed partial class FastCaptureWindow : Window
             RenderPlayerSlots(team);
             ImageListTitle.Text = UsesPlayers && team is not null ? $"Player {team.CurrentPlayer} images" : "Incoming images";
             PhotoCount.Text = UsesPlayers && team is not null ? $"{_snapshot.Images.Count} image(s) · Player {team.CurrentPlayer}" : $"{_snapshot.Images.Count} recent image(s)";
-            if (_controller.ActionMode)
+            if (_controller.ActionMode && (_actionProgressJob != job.Id || DateTime.UtcNow >= _nextActionRefresh))
             {
                 var action = await _controller.ActionAsync(s => s.GetStatusAsync(job.Id));
+                if (_closed || _jobId != job.Id) return;
+                _actionProgressJob = job.Id; _nextActionRefresh = DateTime.UtcNow.AddSeconds(1);
                 ActionClockStatus.Text = _controller.ActionConnectionStatus + "\n" + string.Join(" · ", action.Cameras.Select(camera =>
                 {
                     var clock = action.Clocks.Where(c => c.CameraKey == camera.CameraKey && c.UntilUtcTicks > DateTime.UtcNow.Ticks).OrderByDescending(c => c.FromUtcTicks).FirstOrDefault();
                     return $"{(camera.Name.Length > 0 ? camera.Name : camera.CameraKey)}: " + (clock is null ? "verification needed" : $"verified, correction {TimeSpan.FromTicks(clock.OffsetTicks).TotalSeconds:0.0}s") +
                         (camera.Issue.Length > 0 ? " (" + camera.Issue + ")" : "");
                 }));
-                ActionTransferStatus.Text = $"{action.HeldCount} held for review. Camera buffer total is unknown.\n" +
-                    string.Join(" · ", action.Progress.Select(p => $"{p.Team}: {p.Delivered} delivered, {p.Pending} pending"));
+                ActionTransferStatus.Text = $"{action.Progress.Sum(p => p.Delivered)} delivered · {action.Progress.Sum(p => p.Pending)} pending · {action.HeldCount} held for review · {_controller.QueuedActionFiles} incoming files queued. Camera buffer total is unknown.\n" +
+                    string.Join(" · ", action.Progress.Where(p => p.Pending > 0 || p.TeamId == job.CurrentTeamId).OrderBy(p => p.TeamId == job.CurrentTeamId ? 0 : 1).ThenByDescending(p => p.Pending).Take(8)
+                        .Select(p => $"{p.Team}: {p.Delivered} delivered, {p.Pending} pending"));
             }
             var signature = job.CurrentTeamId + ":" + (UsesPlayers ? team?.CurrentPlayer : 0) + "|" +
                 string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}:{x.IndividualDeliveredPath}:{x.DeliveredPath}"));
@@ -373,7 +378,7 @@ public sealed partial class FastCaptureWindow : Window
         if (_jobId is { } jobId) await _controller.ConnectActionAsync(jobId);
     });
     private void OnVerifyActionClick(object? sender, RoutedEventArgs e) => _controller.VerifyActionCameras(RepeatActionClockChecks.IsChecked == true);
-    private void OnRepeatActionClockChecksChanged(object? sender, RoutedEventArgs e) => _controller.SetRepeatActionClockChecks(RepeatActionClockChecks.IsChecked == true);
+    private void OnRepeatActionClockChecksChanged(object? sender, RoutedEventArgs e) => _controller.SetRepeatActionClockChecks((sender as CheckBox)?.IsChecked == true);
     private async void OnReviewActionClick(object? sender, RoutedEventArgs e)
     {
         if (_snapshot is not { } snapshot) return;

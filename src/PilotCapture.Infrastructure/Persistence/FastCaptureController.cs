@@ -7,6 +7,7 @@ namespace PilotCapture.Infrastructure.Persistence;
 public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsyncDisposable, IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _actionFiles = new(1, 1);
     private readonly SemaphoreSlim _wake = new(0, 1);
     private CancellationTokenSource? _stop;
     private Task? _watchTask;
@@ -16,6 +17,7 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
     private void QueueActionPath(string path) { if (_actionIncoming.TryAdd(path, 0)) _actionQueue.Enqueue(path); }
     private SmartShooterActionBridge? _actionBridge;
     public bool ActionMode { get; set; }
+    public int QueuedActionFiles => _actionIncoming.Count;
     public string ActionConnectionStatus => _actionBridge?.Status ?? "SS not connected. Enable its External API, then connect below.";
     public Task<T> ActionAsync<T>(Func<IActionCaptureService, Task<T>> action) => Task.Run(async () =>
     {
@@ -27,10 +29,20 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
     {
         await ActionAsync(s => s.EnableAsync(jobId, DateTime.UtcNow.Ticks));
         if (_actionBridge is not null) await _actionBridge.StopAsync();
-        _actionBridge = new(factory, jobId); _actionBridge.Start();
+        _actionBridge = new(factory, jobId, Wake); _actionBridge.Start();
     }
     public void VerifyActionCameras(bool repeatWhenIdle) => _actionBridge?.VerifyCameras(repeatWhenIdle);
     public void SetRepeatActionClockChecks(bool enabled) => _actionBridge?.SetRepeatChecks(enabled);
+    public async Task AssignActionPhotosAsync(string jobId, IReadOnlyList<string> ids, string teamId)
+    {
+        await _actionFiles.WaitAsync();
+        try
+        {
+            foreach (var id in ids) await ActionAsync(s => s.AssignHeldAsync(jobId, id, teamId));
+            await ExecuteAsync(s => s.ScanAsync(jobId, actionPaths: []));
+        }
+        finally { _actionFiles.Release(); }
+    }
     public string? Error { get; private set; }
     public bool IsRunning => _watchTask is { IsCompleted: false };
     public async Task<T> ExecuteAsync<T>(Func<IFastCaptureService, Task<T>> action)
@@ -64,6 +76,7 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
             while (!token.IsCancellationRequested)
             {
                 var settled = false;
+                string[]? paths = null;
                 try
                 {
                     // One intake worker; Action UI commands use independent short DB scopes.
@@ -74,14 +87,20 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
                     }
                     var batch = new List<string>();
                     if (ActionMode) while (batch.Count < 8 && _actionQueue.TryDequeue(out var path)) { _actionIncoming.TryRemove(path, out _); batch.Add(path); }
-                    var paths = ActionMode ? batch.ToArray() : null;
-                    settled = await ExecuteAsync(s => s.ScanAsync(jobId, token, paths));
+                    paths = ActionMode ? batch.ToArray() : null;
+                    if (ActionMode) await _actionFiles.WaitAsync(token);
+                    try { settled = await ExecuteAsync(s => s.ScanAsync(jobId, token, paths)); }
+                    finally { if (ActionMode) _actionFiles.Release(); }
                     if (!settled && paths is not null) foreach (var path in paths) QueueActionPath(path);
                     if (!_actionIncoming.IsEmpty) settled = false;
                     Error = settled ? null : "Processing incoming JPEGs.";
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
-                catch (Exception exception) { Error = exception.Message; }
+                catch (Exception exception)
+                {
+                    Error = exception.Message;
+                    if (paths is not null) foreach (var path in paths) QueueActionPath(path);
+                }
                 try { await _wake.WaitAsync(TimeSpan.FromMilliseconds(settled ? 2000 : 200), token); }
                 catch (OperationCanceledException) { break; }
             }
@@ -96,5 +115,5 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
     }
     public async Task DisconnectActionAsync() { if (_actionBridge is not null) { await _actionBridge.StopAsync(); _actionBridge = null; } }
     public void Dispose() { _stop?.Cancel(); _watcher?.Dispose(); _actionBridge?.Dispose(); }
-    public async ValueTask DisposeAsync() { await StopAsync(); await DisconnectActionAsync(); _gate.Dispose(); _wake.Dispose(); }
+    public async ValueTask DisposeAsync() { await StopAsync(); await DisconnectActionAsync(); _gate.Dispose(); _actionFiles.Dispose(); _wake.Dispose(); }
 }

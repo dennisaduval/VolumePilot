@@ -10,7 +10,7 @@ using PilotCapture.Domain;
 namespace PilotCapture.Infrastructure.Persistence;
 
 /// <summary>SS sockets stay on one dedicated thread. No image copies or UI work on this thread.</summary>
-public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, string jobId) : IDisposable
+public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, string jobId, Action? wake = null) : IDisposable
 {
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentQueue<bool> _verify = new();
@@ -52,6 +52,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
         if (Text(root, "msg_id") == "PhotoUpdated") Photo(root);
         if (root.TryGetProperty("PhotoInfo", out var photos) && photos.ValueKind == JsonValueKind.Array)
             foreach (var photo in photos.EnumerateArray()) Photo(photo);
+        wake?.Invoke();
     }
     private void Run()
     {
@@ -89,7 +90,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
             }
             return false;
         }
-        var nextSync = DateTime.MinValue; var lastVerification = DateTime.MinValue;
+        var nextSync = DateTime.MinValue; var lastVerification = DateTime.MinValue; var nextIdleCheck = DateTime.MinValue;
         var requestedVerification = false;
         try
         {
@@ -98,7 +99,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                 try
                 {
                     Events();
-                    if (_verify.TryDequeue(out var repeat)) { _repeat = repeat; requestedVerification = true; }
+                    if (_verify.TryDequeue(out var repeat)) { _repeat = repeat; requestedVerification = true; nextIdleCheck = DateTime.MinValue; }
                     var now = DateTime.UtcNow;
                     if (now >= nextSync)
                     {
@@ -110,14 +111,15 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                         if (!requestedVerification && !_repeat) Volatile.Write(ref _status, "SS connected. Verify cameras before shooting; verification takes test photos.");
                     }
                     var repeatDue = false;
-                    if (Volatile.Read(ref _repeat) && now - lastVerification >= TimeSpan.FromSeconds(30))
+                    if (now >= nextIdleCheck && Volatile.Read(ref _repeat) && now - lastVerification >= TimeSpan.FromSeconds(30))
                     {
                         var check = Service(s => s.GetStatusAsync(jobId, _stop.Token));
                         repeatDue = now - lastVerification >= TimeSpan.FromMinutes(15) || check.Cameras.Any(c => c.Status is "Ready" or "Busy" &&
                             !check.Clocks.Any(s => s.CameraKey == c.CameraKey && s.UntilUtcTicks > now.Ticks));
                     }
-                    if (requestedVerification || repeatDue)
+                    if (now >= nextIdleCheck && (requestedVerification || repeatDue))
                     {
+                        nextIdleCheck = now.AddSeconds(5);
                         var state = Service(s => s.GetStatusAsync(jobId, _stop.Token));
                         var online = state.Cameras.Where(c => c.Status is "Ready" or "Busy").ToArray();
                         if (online.Length == 0) { Volatile.Write(ref _status, "No connected cameras reported by SS."); }
@@ -139,6 +141,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                             requestedVerification = false; lastVerification = now;
                         }
                     }
+                    else if (now >= nextIdleCheck) nextIdleCheck = now.AddSeconds(5);
                     foreach (var key in _tests.Where(t => Stopwatch.GetElapsedTime(t.Value.Monotonic) > TimeSpan.FromSeconds(10)).Select(t => t.Key).ToArray())
                     { _tests.Remove(key); Volatile.Write(ref _status, "Clock test metadata missing. Verify again when SS is idle."); }
                     _stop.Token.WaitHandle.WaitOne(50);
