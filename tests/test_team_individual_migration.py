@@ -78,3 +78,18 @@ class FastCaptureMigrationTests(unittest.TestCase):
         self.assertEqual(('Rockets / Junior','Rockets_Junior','23',''), db.execute('SELECT name,folder_name,performance_label,details FROM fast_capture_teams').fetchone())
         self.assertEqual([], db.execute('PRAGMA foreign_key_check').fetchall())
         db.close()
+
+    def test_primary_marker_upgrade_queues_only_accepted_multi_mode_primaries(self):
+        db = sqlite3.connect(':memory:')
+        for path in sorted(MIGRATIONS.glob('*.sql')):
+            if path.name < '0010':
+                db.executescript(path.read_text())
+        db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,current_team_id,started_at_ticks) VALUES ('job','Test',2,'source','output',NULL,0)")
+        db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player) VALUES ('team','job','Rockets','023_Rockets',1)")
+        for n, primary, rejected in [(1,1,0), (2,0,0), (3,0,1)]:
+            db.execute('INSERT INTO fast_capture_images(id,job_id,team_id,player_number,sequence,source_path,source_ticks,source_length,stored_path,sha256,is_primary,is_rejected,released,needs_delivery,delivered_path,individual_delivered_path) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                       (str(n),'job','team',1,n,str(n)+'.jpg',1,4,'local.jpg','hash',primary,rejected,1,0,'team.jpg','individual.jpg'))
+        db.executescript((MIGRATIONS / '0010_fast_primary_marker.sql').read_text())
+        self.assertEqual([(1,), (0,), (0,)], db.execute('SELECT needs_delivery FROM fast_capture_images ORDER BY id').fetchall())
+        self.assertEqual([('team.jpg','individual.jpg')]*3, db.execute('SELECT delivered_path,individual_delivered_path FROM fast_capture_images').fetchall())
+        db.close()

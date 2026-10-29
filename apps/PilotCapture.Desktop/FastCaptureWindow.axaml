@@ -44,7 +44,7 @@
         <Button Grid.Row="3" Classes="forward-action" x:Name="NextPlayerButton" Content="Next Player" MinHeight="72" FontSize="22" Click="OnNextPlayerClick" />
       </Grid>
       <Grid x:Name="CaptureControls" Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="10">
-        <TextBlock Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
+        <TextBlock x:Name="ImageListTitle" Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
         <ListBox Grid.Row="1" x:Name="ImagesList" SelectionChanged="OnImageChanged" HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
         <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
           <Button x:Name="PrimaryButton" Content="Primary" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnPrimaryClick" />

@@ -117,6 +117,37 @@ public sealed class MainWindowStartupTests
                     Assert.Same(fullPreview.Source, closeup.Source);
                     Assert.Equal(4, closeup.Zoom); Assert.Equal(new Point(0.5, 0.4), closeup.Center);
 
+                    // Completing a player clears both views. Used slots remain selectable,
+                    // and reopening restores only that player's images and primary controls.
+                    portraitFast.FindControl<Button>("NextPlayerButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => portraitFast.FindControl<TextBlock>("CurrentPlayer")!.Text == "Player 2" && imageList.Items.Count == 0);
+                    Assert.Null(fullPreview.Source); Assert.Null(closeup.Source);
+                    var usedPlayer = portraitFast.FindControl<WrapPanel>("PlayerSlots")!.Children.OfType<Button>().Single(b => b.Tag is 1);
+                    Assert.True(usedPlayer.IsEnabled); Assert.Contains("✓", usedPlayer.Content!.ToString()!);
+                    usedPlayer.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => portraitFast.FindControl<TextBlock>("CurrentPlayer")!.Text == "Player 1" && imageList.Items.Count == 2 && fullPreview.Source is not null);
+                    Assert.All(imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>(), p => Assert.Equal(1, p.PlayerNumber));
+                    Assert.True(portraitFast.FindControl<Button>("PrimaryButton")!.IsEnabled);
+                    var changedPrimaryId = imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().First().Id;
+                    portraitFast.FindControl<Button>("PrimaryButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single(p => p.IsPrimary).Id == changedPrimaryId);
+                    File.WriteAllBytes(Path.Combine(incoming, "p1-return-extra.jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
+                    Complete(controller.ExecuteAsync(service => service.ScanAsync(jobId)));
+                    Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
+                    Assert.Equal(3, imageList.Items.Count);
+                    Assert.Equal(changedPrimaryId, imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single(p => p.IsPrimary).Id);
+                    portraitFast.FindControl<Button>("NextPlayerButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => portraitFast.FindControl<TextBlock>("CurrentPlayer")!.Text == "Player 2" && imageList.Items.Count == 0);
+                    File.WriteAllBytes(Path.Combine(incoming, "p2-photo.jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
+                    Complete(controller.ExecuteAsync(service => service.ScanAsync(jobId)));
+                    Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
+                    Assert.Equal(2, Assert.Single(imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>()).PlayerNumber);
+                    portraitFast.FindControl<WrapPanel>("PlayerSlots")!.Children.OfType<Button>().Single(b => b.Tag is 1)
+                        .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => portraitFast.FindControl<TextBlock>("CurrentPlayer")!.Text == "Player 1" && imageList.Items.Count == 3 && fullPreview.Source is not null);
+                    Assert.All(imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>(), p => Assert.Equal(1, p.PlayerNumber));
+                    Assert.Equal("Player 1 images", portraitFast.FindControl<TextBlock>("ImageListTitle")!.Text);
+
                     // All source columns are visible with optional usage choices, including
                     // unfamiliar names and a title record before the real header.
                     var adaptable = System.Text.Encoding.UTF8.GetBytes("Event title\r\nRun code,Squad,Age band,Organization,Unused\r\n103,Rockets,Junior,Club A,keep\r\n104,Rockets,Senior,Club A,also keep\r\n105,Stars,Senior,Club B,raw\r\n");

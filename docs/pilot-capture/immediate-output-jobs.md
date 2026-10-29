@@ -18,7 +18,7 @@ Select a team, then photograph individuals without selecting or completing playe
 
 ## Print on site Team and Individuals
 
-Select a team. Start with Player 1, photograph as many frames as needed, and press the large Next Player button. Each team's counter is independent and persists between restarts. Used slots are displayed with a checkmark and cannot be selected for reuse. Advancing an unused slot does nothing. No player folder is created until a photo actually needs that folder.
+Select a team. Start with Player 1, photograph as many frames as needed, and press the large Next Player button. Each team's counter is independent and persists between restarts. Used slots are displayed with a checkmark and can be selected again to review or add photos. Advancing an unused slot does nothing. No player folder is created until a photo actually needs that folder.
 
 The first non-rejected shot is the primary. Choosing another primary replaces the previous choice. Rejecting the current primary before completion promotes the first remaining eligible shot. Restoring a rejected shot does not replace a valid primary.
 
@@ -27,9 +27,9 @@ Dennis explicitly chose **release primary on Next Player**, because immediately 
 - Every accepted shot, including the current primary, goes to `<chosen individual output>/<team>/Player N/` as it arrives.
 - The primary team copy remains held until Next Player.
 - Next Player releases the final primary into `<chosen team output>/<team>/` and appends `_primary` immediately before `.jpg`.
-- The primary also remains in the player folder. Individual filenames stay stable, without a role suffix, so changing primary does not republish an already consumed individual photo. Only the team copy uses `_primary.jpg`. This supersedes the earlier interpretation of “all other images.”
+- The primary also remains in the player folder and carries `_Primary.jpg`; non-primary copies have no role suffix. Present individual copies are renamed when their role changes. Consumed copies are not recreated merely to change the filename marker. The team copy retains `_primary.jpg`. This supersedes the earlier interpretation of “all other images.”
 - Switching teams completes/releases a used current player before changing attribution. Returning to a team resumes its next unused slot.
-- Completed players' primary choices are locked to prevent duplicate printing. Their images may still be rejected/restored, but that cannot undo downstream processing already performed.
+- A previously photographed player can be selected again. Additional photos join that player's existing set without changing a valid primary. The operator may explicitly change or reject the primary; a changed team primary waits until the player is completed/left. Files already consumed/printed cannot be recalled.
 
 ## Action
 
@@ -68,7 +68,7 @@ New jobs record the JPEG source versions present at creation and ignore those ve
 
 The next hardware report clarified that **all three modes require roster/performance-order import**. “No CSV needed” meant no output CSV, not removing CSV roster input. All three now share Import roster / performance order, per-column optional mapping with sample values, ordered team/performance selection and Next team / performance. Selecting an order column sorts numeric values naturally; without it, first appearance in the file defines order. Full source rows, extra/duplicate headers and the confirmed mapping remain in SQLite. Re-importing preserves existing capture IDs and player counters; unlisted prior teams remain after the newly imported schedule so their photos are not lost. Repeated team names with different performance labels are separate selectable entries with separate numbered performance folders for new captures.
 
-Only Team and Individuals adds a visible grid of **40 numbered player slots under the team name**. Used slots show a checkmark and cannot be selected again; the current slot remains active. Unused slots may be selected directly. Moving away from a used current slot releases its primary. Next Player skips slots already photographed. More slots appear if the team exceeds 40; folders still appear only when images need them.
+Only Team and Individuals adds a visible grid of **40 numbered player slots under the team name**. Used slots show a checkmark and remain selectable for revisits; the current slot remains active. Unused slots may be selected directly. Moving away from a used current slot releases its primary. Next Player skips slots already photographed. More slots appear if the team exceeds 40; folders still appear only when images need them.
 
 The reported calling-thread error came from reading Avalonia form controls inside a controller background delegate. Form values are now captured as immutable job settings on the UI thread before dispatch. UI regression coverage submits a real configured form, imports a schedule, checks the 40-slot grid and starts the real Action watcher to verify output delivery.
 
@@ -89,7 +89,7 @@ Hardware checks for this correction:
 
 - Shoot portrait JPEGs from both camera mounting directions. Verify upright preview; test Turn 180° for missing/wrong camera orientation metadata.
 - Tap short and tall subjects' heads, change zoom and shoot again. Verify positioning persists and newest shot replaces the full/closeup views together.
-- Confirm all accepted player photos, including the primary, appear in the individual folder immediately. Change primary and verify individual filenames remain stable.
+- Confirm all accepted player photos, including the primary, appear in the individual folder immediately. Change primary and verify exactly one present individual copy has `_Primary.jpg`, with no consumed file republished just to rename it.
 - Confirm only the selected primary reaches the team output on Next Player with `_primary.jpg`.
 - Reject a photo with both copies present and verify both are removed and the reject copy appears. A consumed/printed file cannot be recalled.
 - Consume one output, disconnect the other destination, reconnect and verify the consumed delivery is not repeated.
@@ -117,3 +117,25 @@ Additional hardware acceptance:
 - Include club, division and level as Details. Search a partial team name and a partial performance number; confirm all matching divisions appear and typing alone does not change capture attribution.
 - Select a result, capture, and confirm numbered folders in team, individual and Rejects output. Re-import after delivery and confirm the existing destination is not reissued.
 - At the laptop's normal scaling and minimum supported window size, verify full filenames, Primary/Rejected labels, touch review buttons and the wider portrait closeup remain visible without overlap.
+
+
+## Selected-player view, revisits and primary markers
+
+The next hardware request supersedes the earlier lock on photographed player slots and the decision to omit an individual primary suffix.
+
+In Print on site Team and Individuals, the image list, full preview, closeup, photo count and image-role actions are scoped to the **selected player on the selected team/performance**. An empty/new player has an empty list and both image views clear. Returning to a photographed player restores all that player's images, including earlier visits and rejected photos; the previous 100-recent-team limit does not apply to this mode. Team Only and Action retain their recent-team lists.
+
+Checkmarked player buttons stay enabled. Selecting one drains incoming files for the previous player, completes/leaves that player and resumes the selected existing player number. It does not create a second identity or automatically change an existing primary. Additional shots append to the same player's set. Next Player completes the current player and skips already photographed slots while moving forward. Player selection and image associations persist across restarts.
+
+Primary selection is allowed for any image belonging to the currently selected player, including an image from an earlier completed visit. Changing primary explicitly overrides the previous role, renames still-present individual copies and holds the new team copy until Next Player or leaving the player. Rejecting the selected player's primary promotes the first remaining eligible image and holds that replacement team copy until completion. Merely reopening a player and leaving without changes does not republish the previous team primary.
+
+The individual primary filename ends in **`_Primary.jpg`**. Other accepted individual images have no role suffix. The team primary retains the existing `_primary.jpg` suffix. Original hot-folder and archived filenames/bytes are untouched. Role-only renames within the individual folder validate ownership and use an atomic rename where the copy still exists. If a watcher consumed it, the acknowledgement adopts the new name without recreating the file. Explicit reject/restore retains its existing semantics. A deliberate new primary may enter the team watcher after completion; it cannot cancel a prior print/import already performed downstream.
+
+Migration 10 queues accepted existing multi-mode primaries for marker reconciliation on the next job scan. It preserves both delivery paths until reconciled and does not republish previously consumed team or individual copies.
+
+Acceptance:
+
+- Photograph Players 1 and 2; switch between them and confirm that each list/preview contains only that player's images. A new player must show no prior-player photo.
+- Reopen Player 1, add shots and verify its primary stays selected until explicitly changed. Choose a different old/new shot as primary and check both the suffix and the delayed team copy.
+- Verify a single present `_Primary.jpg` copy in each player's individual folder, checkmarked revisit buttons, restart persistence and Next Player skipping used slots.
+- Consume a delivery, revisit without changing primary and confirm it is not reissued. Upgrade an existing job and verify marker-only reconciliation renames present copies without recreating consumed copies.

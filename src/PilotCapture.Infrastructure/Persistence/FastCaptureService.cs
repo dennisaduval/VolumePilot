@@ -17,8 +17,15 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
     {
         var job = await db.FastJobs.AsNoTracking().SingleAsync(x => x.Id == jobId, token);
         var teams = await db.FastTeams.AsNoTracking().Where(x => x.JobId == jobId).OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToListAsync(token);
-        var images = await db.FastImages.AsNoTracking().Where(x => x.JobId == jobId && x.TeamId == job.CurrentTeamId)
-            .OrderByDescending(x => x.Sequence).Take(100).ToListAsync(token);
+        var imagesQuery = db.FastImages.AsNoTracking().Where(x => x.JobId == jobId && x.TeamId == job.CurrentTeamId);
+        if (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual)
+        {
+            var player = teams.FirstOrDefault(t => t.Id == job.CurrentTeamId)?.CurrentPlayer;
+            imagesQuery = imagesQuery.Where(x => x.PlayerNumber == player);
+        }
+        // Show every image of the selected player. Automatic modes keep their recent-team list.
+        var ordered = imagesQuery.OrderByDescending(x => x.Sequence);
+        var images = await (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual ? ordered : ordered.Take(100)).ToListAsync(token);
         var used = await db.FastImages.Where(x => x.TeamId == job.CurrentTeamId && x.PlayerNumber > 0)
             .Select(x => x.PlayerNumber).Distinct().OrderBy(x => x).ToListAsync(token);
         return new(job, teams, images, used);
@@ -93,13 +100,15 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
     {
         var image = await db.FastImages.SingleAsync(x => x.Id == imageId, token);
         var job = await db.FastJobs.SingleAsync(x => x.Id == image.JobId, token);
-        if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual || image.Released)
-            throw new InvalidOperationException("Primary selection is available for the current, unfinished player only.");
+        var team = await db.FastTeams.SingleAsync(x => x.Id == image.TeamId, token);
+        if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual || job.CurrentTeamId != image.TeamId || team.CurrentPlayer != image.PlayerNumber)
+            throw new InvalidOperationException("Select that player before changing their primary image.");
+        if (image.IsPrimary && !image.IsRejected) return;
         await using var tx = await db.Database.BeginTransactionAsync(token);
         var images = await db.FastImages.Where(x => x.TeamId == image.TeamId && x.PlayerNumber == image.PlayerNumber).ToListAsync(token);
         foreach (var photo in images) { photo.IsPrimary = false; photo.NeedsDelivery = true; }
         await db.SaveChangesAsync(token);
-        image.IsRejected = false; image.IsPrimary = true;
+        image.IsRejected = false; image.IsPrimary = true; image.Released = false;
         await db.SaveChangesAsync(token);
         await tx.CommitAsync(token);
         await DeliverAsync(job, token);
@@ -113,11 +122,14 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         image.IsRejected = reject;
         if (reject) image.IsPrimary = false;
         await db.SaveChangesAsync(token);
-        if (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual && !image.Released)
+        var currentTeam = job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual
+            ? await db.FastTeams.SingleAsync(x => x.Id == image.TeamId, token) : null;
+        if (currentTeam is not null && job.CurrentTeamId == image.TeamId && currentTeam.CurrentPlayer == image.PlayerNumber)
         {
             var eligible = await db.FastImages.Where(x => x.TeamId == image.TeamId && x.PlayerNumber == image.PlayerNumber && !x.IsRejected)
                 .OrderBy(x => x.Sequence).ToListAsync(token);
-            if (eligible.Count > 0 && !eligible.Any(x => x.IsPrimary)) { eligible[0].IsPrimary = true; eligible[0].NeedsDelivery = true; }
+            if (eligible.Count > 0 && !eligible.Any(x => x.IsPrimary))
+            { eligible[0].IsPrimary = true; eligible[0].Released = false; eligible[0].NeedsDelivery = true; }
             await db.SaveChangesAsync(token);
         }
         await DeliverAsync(job, token);
@@ -197,7 +209,6 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching players.");
         var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
         if (team.CurrentPlayer == player) return;
-        if (await db.FastImages.AnyAsync(x => x.TeamId == team.Id && x.PlayerNumber == player, token)) throw new InvalidOperationException("That player slot already has photos and cannot be reused.");
         await NextPlayerAsync(jobId, token);
         team.CurrentPlayer = player;
         await db.SaveChangesAsync(token);
@@ -307,11 +318,11 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
             else if (image.IsPrimary)
                 target = image.Released ? Path.Combine(job.OutputFolder, team.FolderName, stem + "_primary.jpg") : null;
             else target = null;
-            // Individual filenames stay stable when primary selection changes. Only
-            // the team copy carries _primary and waits for Next Player.
+            // The individual primary is marked immediately. The team copy still
+            // waits until the operator completes/leaves this player.
             var individual = job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual && !image.IsRejected
-                ? Path.Combine(job.IndividualsFolder!, team.FolderName, $"Player {image.PlayerNumber}", stem + ".jpg") : null;
-            image.IndividualDeliveredPath = await ReconcileCopyAsync(image, image.IndividualDeliveredPath, individual, token);
+                ? Path.Combine(job.IndividualsFolder!, team.FolderName, $"Player {image.PlayerNumber}", stem + (image.IsPrimary ? "_Primary" : "") + ".jpg") : null;
+            image.IndividualDeliveredPath = await ReconcileCopyAsync(image, image.IndividualDeliveredPath, individual, token, job.IndividualsFolder);
             await db.SaveChangesAsync(token); // Acknowledge this destination independently.
             image.DeliveredPath = await ReconcileCopyAsync(image, image.DeliveredPath, target, token);
             image.NeedsDelivery = false;
@@ -319,10 +330,29 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         }
     }
 
-    private static async Task<string?> ReconcileCopyAsync(FastCaptureImage image, string? previous, string? target, CancellationToken token)
+    private static async Task<string?> ReconcileCopyAsync(FastCaptureImage image, string? previous, string? target, CancellationToken token, string? destinationRoot = null)
     {
         // An acknowledged same-path copy may have been consumed. Do not publish it again.
         if (string.Equals(target, previous, StringComparison.OrdinalIgnoreCase)) return target;
+        // Role-only filename changes rename a still-present copy atomically. If
+        // a watcher already consumed it, update the acknowledgement without reissuing it.
+        if (target is not null && previous is not null &&
+            string.Equals(Path.GetDirectoryName(target), Path.GetDirectoryName(previous), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(WithoutPrimaryMarker(target), WithoutPrimaryMarker(previous), StringComparison.OrdinalIgnoreCase))
+        {
+            if (destinationRoot is not null && !Directory.Exists(destinationRoot))
+                throw new IOException($"Individual destination is unavailable; filename change remains pending: {destinationRoot}");
+            if (File.Exists(target) && await HashAsync(target, token) != image.Sha256)
+                throw new IOException($"Destination file differs; it was not overwritten: {target}");
+            if (File.Exists(previous))
+            {
+                if (await HashAsync(previous, token) != image.Sha256)
+                    throw new IOException($"Previously delivered image changed; it was not renamed: {previous}");
+                if (File.Exists(target)) File.Delete(previous);
+                else File.Move(previous, target);
+            }
+            return target;
+        }
         if (target is not null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -338,6 +368,12 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
             File.Delete(previous);
         }
         return target;
+    }
+
+    private static string WithoutPrimaryMarker(string path)
+    {
+        var stem = Path.GetFileNameWithoutExtension(path);
+        return stem.EndsWith("_Primary", StringComparison.OrdinalIgnoreCase) ? stem[..^8] : stem;
     }
 
     private static string RejectRoot(string output) => Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(output))

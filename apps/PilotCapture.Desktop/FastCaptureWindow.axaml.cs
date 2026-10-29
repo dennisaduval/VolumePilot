@@ -85,6 +85,7 @@ public sealed partial class FastCaptureWindow : Window
         try
         {
             var selected = SelectedImage()?.Id;
+            var previousNewest = _snapshot?.Images.FirstOrDefault()?.Id;
             var requestedJob = _jobId;
             var snapshot = await _controller.ExecuteAsync(s => s.GetSnapshotAsync(requestedJob));
             if (_closed || _jobId != requestedJob) return;
@@ -98,11 +99,12 @@ public sealed partial class FastCaptureWindow : Window
             PlayerTeamName.Text = team?.Name ?? "Select a team";
             CurrentPlayer.Text = team is null ? "" : $"Player {team.CurrentPlayer}";
             RenderPlayerSlots(team);
-            PhotoCount.Text = $"{_snapshot.Images.Count} recent image(s)";
-            var signature = string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}"));
+            ImageListTitle.Text = UsesPlayers && team is not null ? $"Player {team.CurrentPlayer} images" : "Incoming images";
+            PhotoCount.Text = UsesPlayers && team is not null ? $"{_snapshot.Images.Count} image(s) · Player {team.CurrentPlayer}" : $"{_snapshot.Images.Count} recent image(s)";
+            var signature = job.CurrentTeamId + ":" + (UsesPlayers ? team?.CurrentPlayer : 0) + "|" +
+                string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}"));
             if (_displaySignature != signature)
             {
-                var previousNewest = _displaySignature?.Split('|')[0].Split(':')[0];
                 _displaySignature = signature;
                 _settingChoices = true;
                 ImagesList.ItemsSource = _snapshot.Images;
@@ -124,7 +126,7 @@ public sealed partial class FastCaptureWindow : Window
         MonitorButton.Content = _controller.IsRunning ? "Pause watching" : "Start watching";
         MonitorButton.IsEnabled = !_busy && _jobId is not null && _snapshot?.Job.CurrentTeamId is not null;
         NextPlayerButton.IsEnabled = !_busy && _snapshot?.Job.CurrentTeamId is not null;
-        PrimaryButton.IsEnabled = !_busy && SelectedImage() is { Released: false };
+        PrimaryButton.IsEnabled = !_busy && UsesPlayers && SelectedImage() is not null;
         RejectButton.IsEnabled = !_busy && SelectedImage() is not null;
         RejectButton.Content = SelectedImage()?.IsRejected == true ? "Restore" : "Reject";
         PreviewImageStatus.Text = SelectedImage() is { } selected ? ImageState(selected) : "No image selected";
@@ -331,8 +333,9 @@ public sealed partial class FastCaptureWindow : Window
         {
             var used = _snapshot.UsedPlayers.Contains(n); var current = team.CurrentPlayer == n;
             var button = new Button { Tag = n, Content = $"{(used ? "✓ " : "")}Player {n}", Width = 84, MinHeight = 48,
-                IsEnabled = !used || current, FontWeight = current ? Avalonia.Media.FontWeight.Bold : Avalonia.Media.FontWeight.Normal };
+                IsEnabled = true, FontWeight = current ? Avalonia.Media.FontWeight.Bold : Avalonia.Media.FontWeight.Normal };
             if (current) { button.Background = Avalonia.Media.Brushes.DarkBlue; button.Foreground = Avalonia.Media.Brushes.White; }
+            ToolTip.SetTip(button, used ? $"Reopen Player {n} to review or add photos" : $"Select Player {n}");
             button.Click += OnPlayerSlotClick; PlayerSlots.Children.Add(button);
         }
     }
