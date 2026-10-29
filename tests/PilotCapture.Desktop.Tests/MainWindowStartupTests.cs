@@ -97,7 +97,8 @@ public sealed class MainWindowStartupTests
                     Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
                     var fullPreview = portraitFast.FindControl<Image>("Preview")!;
                     var closeup = portraitFast.FindControl<PortraitCropView>("Closeup")!;
-                    Assert.NotNull(fullPreview.Source); Assert.Same(fullPreview.Source, closeup.Source);
+                    Assert.True(fullPreview.Source is not null, $"Print preview missing. Status: {portraitFast.FindControl<TextBlock>("Status")!.Text}; items: {portraitFast.FindControl<ListBox>("ImagesList")!.Items.Count}; selection: {portraitFast.FindControl<ListBox>("ImagesList")!.SelectedIndex}");
+                    Assert.Same(fullPreview.Source, closeup.Source);
                     Assert.Contains("PRIMARY", portraitFast.FindControl<TextBlock>("PreviewImageStatus")!.Text!);
                     var imageList = portraitFast.FindControl<ListBox>("ImagesList")!;
                     var previewPhoto = imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single();

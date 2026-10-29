@@ -256,7 +256,8 @@ public sealed partial class FastCaptureWindow : Window
         var query = TeamName.Text ?? "";
         var signature = snapshot.Job.CurrentTeamId + "|" + query + "|" + string.Join('|', snapshot.Teams.Select(t => $"{t.Id}:{t.SortOrder}:{t.Name}:{t.PerformanceLabel}:{t.Details}"));
         ActivePerformance.Text = "Current: " + (snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId) is { } current ? FastPerformanceSearch.Label(current) : "select a team / performance");
-        if (Teams.Tag as string == signature) return;
+        if (Teams.Tag as string == signature &&
+            Teams.SelectedIndex == _visibleTeams.ToList().FindIndex(t => t.Id == snapshot.Job.CurrentTeamId)) return;
         var setting = _settingChoices; _settingChoices = true;
         _visibleTeams = FastPerformanceSearch.Find(snapshot.Teams, query);
         Teams.ItemsSource = _visibleTeams.Select(t => new ComboBoxItem { Content = new TextBlock
