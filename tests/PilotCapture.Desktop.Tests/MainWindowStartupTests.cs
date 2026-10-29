@@ -140,7 +140,7 @@ public sealed class MainWindowStartupTests
                     Assert.Contains(labels, label => label.Contains("Junior")); Assert.Contains(labels, label => label.Contains("Senior"));
                     Assert.Contains("Bears", portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text!);
                     search.Text = "104";
-                    Assert.Equal(1, suggestions.Items.Count);
+                    Assert.Single(suggestions.Items);
                     suggestions.SelectedIndex = 0;
                     PumpUntil(() => search.Text == "" && (portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("104"));
                     Assert.Contains("Senior", portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text!);

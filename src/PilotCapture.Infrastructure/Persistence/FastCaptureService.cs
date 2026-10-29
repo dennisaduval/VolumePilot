@@ -227,7 +227,8 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
             if (values.Any(v => v.Length > 0))
                 key += "|" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(values.Select(v => v.ToUpperInvariant())))));
             return new { Row = row.RecordNumber, Name = name, Order = order, Details = display, Key = key,
-                LegacyName = string.Join(" / ", new[] { name }.Concat(values).Where(v => v.Length > 0)) };
+                LegacyNames = new[] { name, string.Join(" / ", new[] { name }.Concat(values).Where(v => v.Length > 0)) }
+                    .Concat(values.Where(v => v.Length > 0).Select(v => name + " / " + v)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() };
         }).Where(x => x.Name.Length > 0).GroupBy(x => (x.Name.ToUpperInvariant(), x.Key)).Select(x => x.First()).ToList();
         if (entries.Count == 0) throw new ArgumentException("The selected columns contain no teams / performances.");
         if (command.OrderColumn is not null && entries.All(x => decimal.TryParse(x.Order, NumberStyles.Number, CultureInfo.InvariantCulture, out _)))
@@ -240,9 +241,16 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         foreach (var entry in entries)
         {
             var team = teams.FirstOrDefault(x => x.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase) && x.PerformanceKey == entry.Key);
-            // Preserve IDs from previews that combined one grouping column into Name.
-            team ??= teams.FirstOrDefault(x => x.Details.Length == 0 && x.Name.Equals(entry.LegacyName, StringComparison.OrdinalIgnoreCase)
-                && x.PerformanceKey == entry.Order.ToUpperInvariant() && !importedIds.Contains(x.Id));
+            // Adopt an older group-in-name entry only when it maps to exactly one
+            // imported performance. Never guess which division owns existing photos.
+            if (team is null)
+            {
+                var legacy = teams.Where(x => x.Details.Length == 0 && x.PerformanceKey == entry.Order.ToUpperInvariant()
+                    && entry.LegacyNames.Contains(x.Name, StringComparer.OrdinalIgnoreCase) && !importedIds.Contains(x.Id)
+                    && entries.Count(e => e.Order.Equals(entry.Order, StringComparison.OrdinalIgnoreCase)
+                        && e.LegacyNames.Contains(x.Name, StringComparer.OrdinalIgnoreCase)) == 1).ToArray();
+                if (legacy.Length == 1) team = legacy[0];
+            }
             if (team is null)
             {
                 team = new FastCaptureTeam { JobId = job.Id };

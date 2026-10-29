@@ -225,13 +225,23 @@ public sealed class FastCaptureServiceTests
         await env.Service.SelectPerformanceAsync(env.JobId, legacy.Id, env.Token);
         await env.ShootAsync("legacy.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
         var delivered = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images).DeliveredPath;
-        var updated = System.Text.Encoding.UTF8.GetBytes("Run,Squad,Division\r\n23,Rockets,Junior\r\n");
-        await env.Service.ImportRosterAsync(new(env.JobId, "updated.csv", updated, 1, null, 0, [2]), env.Token);
+        var updated = System.Text.Encoding.UTF8.GetBytes("Run,Squad,Division,Club\r\n23,Rockets,Junior,Club A\r\n");
+        await env.Service.ImportRosterAsync(new(env.JobId, "updated.csv", updated, 1, null, 0, [2,3]), env.Token);
         snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
         var retained = snapshot.Teams.Single(t => t.Id == legacy.Id);
-        Assert.Equal("Rockets", retained.Name); Assert.Equal("Division: Junior", retained.Details);
+        Assert.Equal("Rockets", retained.Name); Assert.Contains("Division: Junior", retained.Details); Assert.Contains("Club: Club A", retained.Details);
         Assert.Equal("Rockets_Junior", retained.FolderName);
         Assert.Equal(delivered, Assert.Single(snapshot.Images).DeliveredPath); Assert.True(File.Exists(delivered));
+        var ambiguous = new FastCaptureTeam { JobId = env.JobId, Name = "Stars / Junior", FolderName = "Old_Stars", PerformanceKey = "77", PerformanceLabel = "77", SortOrder = 10 };
+        env.Db.FastTeams.Add(ambiguous); await env.Db.SaveChangesAsync(env.Token);
+        await env.Service.SelectPerformanceAsync(env.JobId, ambiguous.Id, env.Token);
+        await env.ShootAsync("ambiguous.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var split = System.Text.Encoding.UTF8.GetBytes("Run,Squad,Division,Club\r\n77,Stars,Junior,Club A\r\n77,Stars,Junior,Club B\r\n");
+        await env.Service.ImportRosterAsync(new(env.JobId, "ambiguous.csv", split, 1, null, 0, [2,3]), env.Token);
+        snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        Assert.Equal("Stars / Junior", snapshot.Teams.Single(t => t.Id == ambiguous.Id).Name);
+        Assert.Equal(2, snapshot.Teams.Count(t => t.Name == "Stars"));
+        Assert.Equal(ambiguous.Id, Assert.Single(snapshot.Images).TeamId);
     }
 
     private sealed class Environment : IAsyncDisposable
