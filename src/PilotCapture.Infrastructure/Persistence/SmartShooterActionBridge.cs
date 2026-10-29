@@ -21,6 +21,8 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
     public string Status => Volatile.Read(ref _status);
     private bool _repeat;
     private long _sequence;
+    private long? _eventSequence;
+    private bool _needsPhotoSync = true;
     public void Start() => _task = Task.Factory.StartNew(Run, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     public void VerifyCameras(bool repeatWhenIdle) { SetRepeatChecks(repeatWhenIdle); _verify.Enqueue(true); }
     public void SetRepeatChecks(bool enabled) => Volatile.Write(ref _repeat, enabled);
@@ -35,6 +37,15 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
     {
         var received = DateTime.UtcNow.Ticks;
         using var doc = JsonDocument.Parse(json);
+        var message = doc.RootElement;
+        if (Text(message, "msg_type") == "Event" && message.TryGetProperty("msg_seq_num", out var sequence) && sequence.TryGetInt64(out var number))
+        {
+            if (_eventSequence is { } prior && number != prior + 1) _needsPhotoSync = true;
+            _eventSequence = number;
+        }
+        // Live-view pixels, property/options updates and other SS traffic do not
+        // belong in the Action database or wake the file worker.
+        if (Text(message, "msg_id") is not ("CameraUpdated" or "PhotoUpdated" or "Synchronise" or "GetCamera")) return;
         Service(s => s.ReceiveSmartShooterAsync(jobId, json, received, _stop.Token));
         void Photo(JsonElement photo)
         {
@@ -90,7 +101,8 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
             }
             return false;
         }
-        var nextSync = DateTime.MinValue; var lastVerification = DateTime.MinValue; var nextIdleCheck = DateTime.MinValue;
+        var nextSync = DateTime.MinValue; var nextPhotoSync = DateTime.MinValue;
+        var lastVerification = DateTime.MinValue; var nextIdleCheck = DateTime.MinValue;
         var requestedVerification = false;
         try
         {
@@ -103,7 +115,12 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                     var now = DateTime.UtcNow;
                     if (now >= nextSync)
                     {
-                        if (!Request("Synchronise")) { Volatile.Write(ref _status, "SS not responding. Enable External API: publisher 54543, requests 54544."); nextSync = now.AddSeconds(3); continue; }
+                        var stateBefore = Service(s => s.GetStatusAsync(jobId, _stop.Token));
+                        var full = _needsPhotoSync || now >= nextPhotoSync || stateBefore.Held.Any(p => p.Issue == "Waiting for SS metadata");
+                        _needsPhotoSync = false;
+                        if (!Request(full ? "Synchronise" : "GetCamera", full ? null : new() { ["CameraSelection"] = "All" }))
+                        { _needsPhotoSync = true; Volatile.Write(ref _status, "SS not responding. Enable External API: publisher 54543, requests 54544."); nextSync = now.AddSeconds(3); continue; }
+                        if (full) nextPhotoSync = now.AddMinutes(5);
                         nextSync = now.AddSeconds(15);
                         var state = Service(s => s.GetStatusAsync(jobId, _stop.Token));
                         foreach (var camera in state.Cameras.Where(c => c.Status is "Ready" or "Busy"))

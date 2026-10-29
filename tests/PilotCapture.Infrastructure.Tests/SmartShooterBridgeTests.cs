@@ -32,10 +32,10 @@ public sealed class SmartShooterBridgeTests
                     using var document = JsonDocument.Parse(json); var request = document.RootElement;
                     var id = request.GetProperty("msg_id").GetString();
                     var reply = new Dictionary<string, object?> { ["msg_type"] = "Response", ["msg_id"] = id, ["msg_seq_num"] = request.GetProperty("msg_seq_num").GetInt64(), ["msg_result"] = true };
-                    if (id == "Synchronise")
+                    if (id is "Synchronise" or "GetCamera")
                     {
                         reply["CameraInfo"] = new[] { new { CameraKey = "canon-r6ii-test", CameraName = "Canon R6 II", CameraStatus = "Ready" } };
-                        reply["PhotoInfo"] = photo is null ? Array.Empty<object>() : new object[] { photo };
+                        if (id == "Synchronise") reply["PhotoInfo"] = photo is null ? Array.Empty<object>() : new object[] { photo };
                     }
                     else if (id == "Shoot")
                     {

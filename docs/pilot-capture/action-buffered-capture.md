@@ -17,7 +17,7 @@ All cameras in one job share its active performance. Cameras photographing diffe
 
 ## Timing contract
 
-SS supplies PhotoKey, CameraKey, full actual PhotoFilename and PhotoDateCaptured. Match files using the actual full path, never an original/computed filename guess. Camera identities distinguish identical camera models. Preserve partial metadata across updates and recover state with Synchronise. A reused source path, multiple photo identities, or changing camera/path/capture-time metadata holds the photo rather than guessing.
+SS supplies PhotoKey, CameraKey, full actual PhotoFilename and PhotoDateCaptured. Match files using the actual full path, never an original/computed filename guess. Camera identities distinguish identical camera models. Preserve partial metadata across updates and recover state with Synchronise. Use camera-only heartbeats between full snapshots; event-sequence gaps, missing file metadata and periodic recovery trigger full photo synchronization. Ignore live-view pixels and unrelated SS events. A reused source path, multiple photo identities, or changing camera/path/capture-time metadata holds the photo rather than guessing.
 
 The SS published API documents CheckClocks and SyncClocks, but does not define clock-check measurement response fields/units. CameraDateTimeOffset is described as a synchronization parameter and is not assumed to be a measured error. A successful CheckClocks reply alone never marks a camera verified. The bridge requests CheckClocks for diagnostics, then uses a uniquely marked Shoot request and its actual photo metadata to establish a bounded time sample.
 
