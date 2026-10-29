@@ -208,6 +208,7 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
         {
             e.ToTable("fast_capture_teams"); e.HasKey(x => x.Id);
             e.Property(x => x.Name).UseCollation("NOCASE"); e.Property(x => x.FolderName).UseCollation("NOCASE");
+            e.HasIndex(x => new { x.JobId, x.Day, x.Hall, x.SortOrder });
             e.HasIndex(x => new { x.JobId, x.Name, x.PerformanceKey }).IsUnique();
             e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         });

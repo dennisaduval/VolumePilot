@@ -217,6 +217,35 @@ public sealed class MainWindowStartupTests
                     Assert.True(fullPreview.Bounds.Width <= 80);
                     Assert.True(closeup.Bounds.Width > fullPreview.Bounds.Width);
 
+                    // Use the real mapping controls and day/hall selectors for a
+                    // weekend schedule. Search and Next stay inside the chosen hall.
+                    var weekend = new FastRosterMappingWindow(jobId, "weekend.csv", System.Text.Encoding.UTF8.GetBytes(
+                        "DAY,HALL,PERFORMANCEORDER,TEAMNAME,PROGRAM,DIVISION,ENTRYTYPE\nSaturday,F,10,Rockets,Club A,Junior,Team\nSaturday,F,2,Stars,Club B,Senior,Team\nSaturday,F,3,Break,,,Break\nSaturday,G,2,Rockets,Club A,Junior,Team\nSunday,F,2,Rockets,Club A,Junior,Team\n"));
+                    var weekendCommand = weekend.BuildCommand();
+                    Assert.Equal(0, weekendCommand.DayColumn); Assert.Equal(1, weekendCommand.HallColumn); Assert.Equal(6, weekendCommand.EntryTypeColumn);
+                    Complete(portraitFast.ImportConfiguredRosterAsync(weekendCommand)); weekend.Close();
+                    var days = portraitFast.FindControl<ComboBox>("ScheduleDays")!;
+                    var halls = portraitFast.FindControl<ComboBox>("ScheduleHalls")!;
+                    Assert.True(portraitFast.FindControl<Grid>("ScheduleFilters")!.IsVisible);
+                    days.SelectedIndex = days.Items.OfType<ComboBoxItem>().ToList().FindIndex(i => (string?)i.Tag == "Saturday");
+                    PumpUntil(() => days.IsEnabled && (portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("Stars"));
+                    Assert.Equal("F", (halls.SelectedItem as ComboBoxItem)?.Tag);
+                    Assert.Equal(2, suggestions.Items.Count);
+                    Assert.All(suggestions.Items.OfType<ComboBoxItem>(), i => Assert.DoesNotContain("Division:", Assert.IsType<TextBlock>(i.Content).Text!));
+                    portraitFast.FindControl<Button>("NextPerformanceButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => days.IsEnabled && (portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("10 · Rockets"));
+                    halls.SelectedIndex = halls.Items.OfType<ComboBoxItem>().ToList().FindIndex(i => (string?)i.Tag == "G");
+                    PumpUntil(() => halls.IsEnabled && suggestions.Items.Count == 1 && (portraitFast.FindControl<TextBlock>("ActivePerformance")!.Text ?? "").Contains("2 · Rockets"));
+                    search.Text = "rock"; Assert.Single(suggestions.Items);
+                    days.SelectedIndex = days.Items.OfType<ComboBoxItem>().ToList().FindIndex(i => (string?)i.Tag == "Sunday");
+                    PumpUntil(() => days.IsEnabled && search.Text == "" && (halls.SelectedItem as ComboBoxItem)?.Tag as string == "F");
+                    Assert.Single(halls.Items); Assert.Single(suggestions.Items);
+                    portraitFast.FindControl<Button>("NextPerformanceButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => (portraitFast.FindControl<TextBlock>("Status")!.Text ?? "").Contains("last performance"));
+                    Assert.Equal("Sunday", (days.SelectedItem as ComboBoxItem)?.Tag);
+                    surface.Measure(new Size(1000, 760)); surface.Arrange(new Rect(0, 0, 1000, 760));
+                    Assert.True(portraitFast.FindControl<Button>("NextPlayerButton")!.Bounds.Height >= 64);
+
                     // Exercise the production controller/watcher with an existing copied JPEG
                     // whose timestamp is older than this job. No image decoding in Action mode.
                     var actionController = new FastCaptureController(provider.GetRequiredService<IServiceScopeFactory>());

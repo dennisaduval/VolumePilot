@@ -1,5 +1,7 @@
 # Immediate-output capture jobs
 
+The current [performance schedule import](schedule-import.md) adds day/hall selection, per-schedule navigation, optional Entry Type mapping and values-only choice labels. It extends and supersedes the earlier unscoped schedule presentation below.
+
 Dennis's hardware feedback and revised requirements, 28 October 2026, replace the assumption that every job should use roster-driven portrait review. The intro screen asks which of five jobs is being shot. These workflows extend the existing local-first SQLite/file architecture; they do not use CSV exports or the portrait role engine.
 
 ## Job chooser

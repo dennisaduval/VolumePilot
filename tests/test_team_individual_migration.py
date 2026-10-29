@@ -37,6 +37,18 @@ class TeamIndividualMigrationTests(unittest.TestCase):
         db.close()
 
 class FastCaptureMigrationTests(unittest.TestCase):
+    def test_day_hall_upgrade_retains_previous_output_and_unscoped_schedule(self):
+        db = sqlite3.connect(':memory:')
+        for path in sorted(MIGRATIONS.glob('*.sql')):
+            if path.name < '0011':
+                db.executescript(path.read_text())
+        db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,started_at_ticks) VALUES ('job','Test',2,'source','output',0)")
+        db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player) VALUES ('team','job','Falcons','Old_Falcons',7)")
+        db.executescript((MIGRATIONS / '0011_fast_schedule_groups.sql').read_text())
+        self.assertEqual(('Old_Falcons', 7, '', ''), db.execute('SELECT folder_name,current_player,day,hall FROM fast_capture_teams').fetchone())
+        self.assertEqual([], db.execute('PRAGMA foreign_key_check').fetchall())
+        db.close()
+
     def test_fast_jobs_upgrade_and_unique_delivery_records(self):
         db = sqlite3.connect(':memory:')
         db.execute('PRAGMA foreign_keys=ON')

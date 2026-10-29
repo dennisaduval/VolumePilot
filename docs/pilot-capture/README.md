@@ -1,5 +1,7 @@
 # Pilot Capture
 
+For current fast-job day/hall mapping and operator navigation, see [Performance schedule import](schedule-import.md).
+
 ## Purpose
 
 Pilot Capture is the desktop, local-first capture application in VolumePilot. It manages event setup, people and team/group associations, photographer-driven subject selection, image intake, review, and reliable local records. The application must remain usable at an event when internet access is absent or unreliable. Cloud synchronization is a later capability and must not be required to capture.

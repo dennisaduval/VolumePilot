@@ -10,6 +10,8 @@ public interface IFastCaptureService
     Task<string> CreateJobAsync(FastJobSettings settings, CancellationToken token = default);
     Task<FastRosterImportResult> ImportRosterAsync(FastRosterImportCommand command, CancellationToken token = default);
     Task SelectPerformanceAsync(string jobId, string teamId, CancellationToken token = default);
+    Task SelectScheduleAsync(string jobId, string day, string hall, CancellationToken token = default);
+    Task NextPerformanceAsync(string jobId, CancellationToken token = default);
     Task SelectPlayerAsync(string jobId, int player, CancellationToken token = default);
     Task IncludeExistingAsync(string jobId, CancellationToken token = default);
     Task SelectTeamAsync(string jobId, string name, CancellationToken token = default);

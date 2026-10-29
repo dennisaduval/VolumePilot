@@ -27,7 +27,7 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
         await using var readVersion = connection.CreateCommand();
         readVersion.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations;";
         var currentVersion = Convert.ToInt32(await readVersion.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
-        if (currentVersion >= 10)
+        if (currentVersion >= 11)
         {
             await EnsureLocalInstallationAsync(cancellationToken);
             return;
@@ -155,6 +155,16 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
             migrate.CommandText = await ReadMigrationAsync("0010_fast_primary_marker.sql", cancellationToken);
             await migrate.ExecuteNonQueryAsync(cancellationToken);
             await MarkMigrationAsync(connection, transaction, 10, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 11)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0011_fast_schedule_groups.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 11, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         await EnsureLocalInstallationAsync(cancellationToken);

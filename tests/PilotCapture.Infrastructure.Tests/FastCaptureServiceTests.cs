@@ -331,7 +331,8 @@ public sealed class FastCaptureServiceTests
             photo.IndividualDeliveredPath = legacy; photo.NeedsDelivery = false;
         }
         await env.Db.SaveChangesAsync(env.Token);
-        await env.Db.Database.ExecuteSqlRawAsync("DELETE FROM schema_migrations WHERE version = 10", env.Token);
+        // Reconstruct the version-9 schema before exercising the real upgrade path.
+        await env.Db.Database.ExecuteSqlRawAsync("DELETE FROM schema_migrations WHERE version >= 10; DROP INDEX ix_fast_capture_teams_schedule; ALTER TABLE fast_capture_teams DROP COLUMN day; ALTER TABLE fast_capture_teams DROP COLUMN hall;", env.Token);
         await using var upgraded = new PilotCaptureDbContext(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(env.Connection).Options);
         await new DatabaseInitializer(upgraded).InitializeAsync(env.Token);
         var service = new FastCaptureService(upgraded, Path.Combine(env.Root, "media"));
@@ -383,6 +384,45 @@ public sealed class FastCaptureServiceTests
         await env.Service.RepairPrimaryFilenameAsync(env.JobId, env.Token);
         await env.Service.SetPrimaryAsync(current.Id, env.Token);
         Assert.False(File.Exists(marked)); Assert.False(File.Exists(bare)); Assert.False(File.Exists(current.DeliveredPath));
+    }
+
+    [Theory]
+    [InlineData(CaptureJobType.PrintOnSiteTeamsOnly)]
+    [InlineData(CaptureJobType.PrintOnSiteTeamAndIndividual)]
+    [InlineData(CaptureJobType.ActionPhotography)]
+    public async Task Day_hall_selection_limits_next_performance_preserves_repeat_appearances_and_routes_separately(CaptureJobType type)
+    {
+        await using var env = await Environment.CreateAsync(type);
+        var command = new FastRosterImportCommand(env.JobId, "weekend.csv", System.Text.Encoding.UTF8.GetBytes(
+            "DAY,HALL,PERFORMANCEORDER,PROGRAM,TEAMNAME,DIVISION,ENTRYTYPE\nSaturday,F,10,Club A,Rockets,Junior,Team\nSaturday,F,2,Club B,Stars,Senior,Team\nSaturday,F,3,,Break,,Break\nSaturday,G,2,Club A,Rockets,Junior,Team\nSunday,F,2,Club A,Rockets,Junior,Team\n"), 4, null, 2, [3, 5], DayColumn: 0, HallColumn: 1, EntryTypeColumn: 6);
+        await env.Service.ImportRosterAsync(command, env.Token);
+        await env.Service.SelectScheduleAsync(env.JobId, "Saturday", "F", env.Token);
+        var snapshot = await env.Service.GetSnapshotAsync(env.JobId, env.Token);
+        Assert.Equal("Stars", snapshot.Teams.Single(t => t.Id == snapshot.Job.CurrentTeamId).Name);
+        await env.Service.NextPerformanceAsync(env.JobId, env.Token);
+        await env.ShootAsync("saturday-f.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var first = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => env.Service.NextPerformanceAsync(env.JobId, env.Token));
+        await env.Service.SelectScheduleAsync(env.JobId, "Saturday", "G", env.Token);
+        await env.ShootAsync("saturday-g.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var second = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        Assert.NotEqual(first.TeamId, second.TeamId);
+        Assert.NotEqual(Path.GetDirectoryName(first.IndividualDeliveredPath ?? first.DeliveredPath), Path.GetDirectoryName(second.IndividualDeliveredPath ?? second.DeliveredPath));
+        await env.Service.SelectScheduleAsync(env.JobId, "Sunday", "F", env.Token);
+        await env.ShootAsync("sunday-f.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var third = Assert.Single((await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images);
+        Assert.NotEqual(first.TeamId, third.TeamId);
+        await Assert.ThrowsAsync<ArgumentException>(() => env.Service.SelectScheduleAsync(env.JobId, "Sunday", "Missing hall", env.Token));
+        var ids = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Select(t => t.Id).Order().ToArray();
+        await env.Service.ImportRosterAsync(command, env.Token);
+        Assert.Equal(ids, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Select(t => t.Id).Order());
+        await using var reopened = new PilotCaptureDbContext(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(env.Connection).Options);
+        var restarted = new FastCaptureService(reopened, Path.Combine(env.Root, "media"));
+        snapshot = await restarted.GetSnapshotAsync(env.JobId, env.Token);
+        Assert.Equal("Sunday", snapshot.Teams.Single(t => t.Id == snapshot.Job.CurrentTeamId).Day);
+        Assert.Equal(third.Id, Assert.Single(snapshot.Images).Id);
+        Assert.Equal(4, snapshot.Teams.Count(t => t.Day.Length > 0));
+        Assert.Contains("Saturday_F_010_Rockets", snapshot.Teams.Single(t => t.Id == first.TeamId).FolderName);
     }
 
     private sealed class Environment : IAsyncDisposable

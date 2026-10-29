@@ -29,6 +29,7 @@ public sealed partial class FastCaptureWindow : Window
     private bool _previewInverted;
     private string? _slotSignature;
     private IReadOnlyList<FastCaptureTeam> _visibleTeams = [];
+    private string? _scheduleSignature;
     public event Action? ReturnRequested;
     private bool UsesPlayers => _type == CaptureJobType.PrintOnSiteTeamAndIndividual;
     public FastCaptureWindow(CaptureJobType type, FastCaptureController controller)
@@ -98,6 +99,7 @@ public sealed partial class FastCaptureWindow : Window
             var job = _snapshot.Job;
             JobName.Text = job.Name; SourcePath.Text = job.SourceFolder; OutputPath.Text = job.OutputFolder; IndividualsPath.Text = job.IndividualsFolder;
             _settingChoices = true;
+            UpdateScheduleFilters();
             UpdatePerformanceChoices();
             _settingChoices = false;
             var team = _snapshot.Teams.FirstOrDefault(x => x.Id == job.CurrentTeamId);
@@ -139,6 +141,7 @@ public sealed partial class FastCaptureWindow : Window
         ImportRosterButton.IsEnabled = !_busy && _jobId is not null;
         NextPerformanceButton.IsEnabled = !_busy && _snapshot is { Teams.Count: > 0 };
         PlayerSlots.IsEnabled = !_busy;
+        ScheduleDays.IsEnabled = ScheduleHalls.IsEnabled = !_busy;
     }
     private async Task ShowPreviewAsync()
     {
@@ -208,6 +211,7 @@ public sealed partial class FastCaptureWindow : Window
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
         Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
         CurrentPlayer.Text = PhotoCount.Text = ActivePerformance.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; ClearTeamSearch();
+        ScheduleFilters.IsVisible = false; _scheduleSignature = null;
     });
     private async void OnSwitchTeamClick(object? sender, RoutedEventArgs e) => await SelectOrAddTeamAsync();
     private async void OnTeamChanged(object? sender, SelectionChangedEventArgs e)
@@ -226,7 +230,7 @@ public sealed partial class FastCaptureWindow : Window
         if (_snapshot is not { } snapshot) return;
         var name = TeamName.Text?.Trim() ?? "";
         if (name.Length == 0) throw new ArgumentException("Type a team name or performance number.");
-        var matches = FastPerformanceSearch.Find(snapshot.Teams, name);
+        var matches = FastPerformanceSearch.Find(ScheduleTeams(snapshot), name);
         if (matches.Count > 1) throw new ArgumentException("Several teams match. Choose the performance / division in the list.");
         if (matches.Count == 1) await _controller.ExecuteAsync(s => s.SelectPerformanceAsync(snapshot.Job.Id, matches[0].Id));
         else await _controller.ExecuteAsync(s => s.SelectTeamAsync(snapshot.Job.Id, name));
@@ -276,12 +280,13 @@ public sealed partial class FastCaptureWindow : Window
     {
         if (_snapshot is not { } snapshot) return;
         var query = TeamName.Text ?? "";
-        var signature = snapshot.Job.CurrentTeamId + "|" + query + "|" + string.Join('|', snapshot.Teams.Select(t => $"{t.Id}:{t.SortOrder}:{t.Name}:{t.PerformanceLabel}:{t.Details}"));
+        var schedule = ScheduleTeams(snapshot);
+        var signature = snapshot.Job.CurrentTeamId + "|" + query + "|" + string.Join('|', schedule.Select(t => $"{t.Id}:{t.SortOrder}:{t.Name}:{t.PerformanceLabel}:{t.Details}"));
         ActivePerformance.Text = "Current: " + (snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId) is { } current ? FastPerformanceSearch.Label(current) : "select a team / performance");
         if (Teams.Tag as string == signature &&
             Teams.SelectedIndex == _visibleTeams.ToList().FindIndex(t => t.Id == snapshot.Job.CurrentTeamId)) return;
         var setting = _settingChoices; _settingChoices = true;
-        _visibleTeams = FastPerformanceSearch.Find(snapshot.Teams, query);
+        _visibleTeams = FastPerformanceSearch.Find(schedule, query);
         Teams.ItemsSource = _visibleTeams.Select(t => new ComboBoxItem { Content = new TextBlock
             { Text = FastPerformanceSearch.Label(t), TextWrapping = TextWrapping.Wrap, FontSize = 20 } }).ToArray();
         Teams.SelectedIndex = _visibleTeams.ToList().FindIndex(t => t.Id == snapshot.Job.CurrentTeamId);
@@ -289,6 +294,44 @@ public sealed partial class FastCaptureWindow : Window
         PerformanceSuggestions.SelectedIndex = -1;
         Teams.PlaceholderText = _visibleTeams.Count == 0 ? "No matches. Add a new team, or change your search." : "Choose a matching team / performance";
         Teams.Tag = signature; _settingChoices = setting;
+    }
+    private static IReadOnlyList<FastCaptureTeam> ScheduleTeams(FastCaptureSnapshot snapshot)
+    {
+        var current = snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId);
+        return FastPerformanceSearch.Schedule(snapshot.Teams, current?.Day ?? "", current?.Hall ?? "");
+    }
+    private static string[] Choices(IEnumerable<string> values) => values.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    private static ComboBoxItem ScheduleItem(string value) => new() { Content = value.Length == 0 ? "Unspecified" : value, Tag = value };
+    private void UpdateScheduleFilters()
+    {
+        if (_snapshot is not { } snapshot) return;
+        ScheduleFilters.IsVisible = snapshot.Teams.Any(t => t.Day.Length > 0 || t.Hall.Length > 0);
+        var current = snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId);
+        var day = current?.Day ?? ""; var hall = current?.Hall ?? "";
+        var signature = snapshot.Job.Id + "|" + day + "|" + hall + "|" + string.Join('|', snapshot.Teams.Select(t => t.Day + ":" + t.Hall));
+        if (_scheduleSignature == signature && ((ScheduleDays.SelectedItem as ComboBoxItem)?.Tag as string) == day
+            && ((ScheduleHalls.SelectedItem as ComboBoxItem)?.Tag as string) == hall) return;
+        var setting = _settingChoices; _settingChoices = true;
+        var days = Choices(snapshot.Teams.Select(t => t.Day));
+        var halls = Choices(snapshot.Teams.Where(t => t.Day.Equals(day, StringComparison.OrdinalIgnoreCase)).Select(t => t.Hall));
+        ScheduleDays.ItemsSource = days.Select(ScheduleItem).ToArray(); ScheduleDays.SelectedIndex = Array.FindIndex(days, d => d.Equals(day, StringComparison.OrdinalIgnoreCase));
+        ScheduleHalls.ItemsSource = halls.Select(ScheduleItem).ToArray(); ScheduleHalls.SelectedIndex = Array.FindIndex(halls, h => h.Equals(hall, StringComparison.OrdinalIgnoreCase));
+        _scheduleSignature = signature; _settingChoices = setting;
+    }
+    private async void OnScheduleDayChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_settingChoices || _snapshot is not { } snapshot || ScheduleDays.SelectedItem is not ComboBoxItem { Tag: string day }) return;
+        var current = snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId);
+        var halls = Choices(snapshot.Teams.Where(t => t.Day.Equals(day, StringComparison.OrdinalIgnoreCase)).Select(t => t.Hall));
+        var hall = halls.FirstOrDefault(h => h.Equals(current?.Hall, StringComparison.OrdinalIgnoreCase)) ?? halls.FirstOrDefault();
+        if (hall is null) return;
+        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.SelectScheduleAsync(snapshot.Job.Id, day, hall)); ClearTeamSearch(); });
+    }
+    private async void OnScheduleHallChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_settingChoices || _snapshot is not { } snapshot || ScheduleHalls.SelectedItem is not ComboBoxItem { Tag: string hall }) return;
+        var day = snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId)?.Day ?? "";
+        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.SelectScheduleAsync(snapshot.Job.Id, day, hall)); ClearTeamSearch(); });
     }
     private static string ImageState(FastCaptureImage image) =>
         (image.PlayerNumber > 0 ? $"Player {image.PlayerNumber} · " : "") + $"{image.Sequence:0000} · " +
@@ -359,10 +402,7 @@ public sealed partial class FastCaptureWindow : Window
     private async void OnNextPerformanceClick(object? sender, RoutedEventArgs e)
     {
         if (_snapshot is not { } snapshot) return;
-        var index = snapshot.Teams.ToList().FindIndex(t => t.Id == snapshot.Job.CurrentTeamId);
-        if (index + 1 >= snapshot.Teams.Count) { _actionError = "This is the last performance in the imported order."; Status.Text = _actionError; return; }
-        var next = snapshot.Teams[index + 1].Id;
-        await SelectPerformanceAsync(snapshot.Job.Id, next);
+        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.NextPerformanceAsync(snapshot.Job.Id)); ClearTeamSearch(); });
     }
     private async void OnImportRosterClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
