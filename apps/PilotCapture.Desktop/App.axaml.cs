@@ -35,7 +35,26 @@ public sealed partial class App : Avalonia.Application
             }
 
             _windowScope = _serviceProvider.CreateScope();
-            desktop.MainWindow = new MainWindow(
+            ShowChooser();
+            void ReplaceWindow(Avalonia.Controls.Window window)
+            {
+                var previous = desktop.MainWindow;
+                desktop.MainWindow = window;
+                window.Show();
+                previous?.Close();
+            }
+            void ShowChooser()
+            {
+                var chooser = new JobChooserWindow();
+                chooser.JobSelected += type =>
+                {
+                    var fast = new FastCaptureWindow(type, _windowScope.ServiceProvider.GetRequiredService<FastCaptureController>());
+                    fast.ReturnRequested += ShowChooser;
+                    ReplaceWindow(fast);
+                };
+                chooser.LegacySelected += () =>
+                {
+                var window = new MainWindow(
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>(),
@@ -43,7 +62,14 @@ public sealed partial class App : Avalonia.Application
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssociationExportService>(),
                 _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterExportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>());
+                _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IJobMediaService>(),
+                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IOriginalPublicationService>());
+                    ReplaceWindow(window);
+                };
+                if (desktop.MainWindow is null) desktop.MainWindow = chooser;
+                else ReplaceWindow(chooser);
+            }
             desktop.Exit += (_, _) =>
             {
                 _windowScope?.Dispose();
@@ -54,3 +80,5 @@ public sealed partial class App : Avalonia.Application
         base.OnFrameworkInitializationCompleted();
     }
 }
+
+

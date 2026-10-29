@@ -16,7 +16,7 @@ public sealed class ImageAssociationExportService(
         "Capture Set ID", "Subject ID", "Subject", "Group", "Membership ID",
         "Roster Number", "Role", "Capture Image ID", "Sequence", "Captured UTC",
         "Review State", "Primary", "Banner", "Original Filename", "Managed Relative Path",
-        "SHA-256", "Bytes", "Asset State", "File Exists"
+        "SHA-256", "Bytes", "Asset State", "File Exists", "Secondary"
     ];
 
     public async Task<int> ExportEventAsync(
@@ -55,7 +55,7 @@ public sealed class ImageAssociationExportService(
                 image.ImageAsset.RelativePath,
                 image.ImageAsset.Sha256,
                 image.ImageAsset.ByteLength,
-                (int)image.ImageAsset.State))
+                (int)image.ImageAsset.State, image.IsSecondary))
             .ToListAsync(cancellationToken);
         records = records
             .OrderBy(record => record.SessionStartedAtUtc)
@@ -93,7 +93,8 @@ public sealed class ImageAssociationExportService(
                 record.Sha256,
                 record.ByteLength.ToString(CultureInfo.InvariantCulture),
                 Enum.GetName(typeof(ImageAssetState), record.AssetState),
-                assetStore.Exists(record.RelativePath).ToString(CultureInfo.InvariantCulture)
+                assetStore.Exists(record.RelativePath).ToString(CultureInfo.InvariantCulture),
+                record.IsSecondary.ToString(CultureInfo.InvariantCulture)
             };
             await writer.WriteLineAsync(string.Join(",", values.Select(Escape)));
         }
@@ -134,5 +135,7 @@ public sealed class ImageAssociationExportService(
         string RelativePath,
         string? Sha256,
         long ByteLength,
-        int AssetState);
+        int AssetState,
+        bool IsSecondary);
 }
+

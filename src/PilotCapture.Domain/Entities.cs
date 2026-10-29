@@ -5,6 +5,7 @@ public sealed class Event
     public string Id { get; set; } = Ids.New();
     public string Name { get; set; } = string.Empty;
     public DateOnly? EventDate { get; set; }
+    public CaptureJobType JobType { get; set; } = CaptureJobType.TeamAndIndividual;
     public DateTimeOffset CreatedAtUtc { get; set; }
     public bool IsArchived { get; set; }
 }
@@ -46,6 +47,7 @@ public sealed class Membership
     public RosterImport? SourceImport { get; set; }
     public string? RosterNumber { get; set; }
     public string? Role { get; set; }
+    public string? SpaDataJson { get; set; }
     public string? SourceRowKey { get; set; }
     public string? SourceDataJson { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
@@ -67,6 +69,7 @@ public sealed class LocalInstallation
     public string InstallationId { get; private set; } = Ids.New();
     public string StationCode { get; set; } = "s10";
     public string? SmartShooterOutputPath { get; set; }
+    public string? MasterMediaPath { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public static LocalInstallation Create(string stationCode, DateTimeOffset createdAtUtc)
@@ -126,6 +129,8 @@ public sealed class CaptureImage
     public string ImageAssetId { get; set; } = string.Empty;
     public ImageAsset? ImageAsset { get; set; }
     public CaptureImageReviewState ReviewState { get; set; } = CaptureImageReviewState.Pending;
+    public string SelectionScopeId { get; set; } = string.Empty;
+    public bool IsSecondary { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsBanner { get; set; }
     public int SequenceNumber { get; set; }
@@ -136,6 +141,9 @@ public sealed class ImageAsset
 {
     public string Id { get; set; } = Ids.New();
     public string RelativePath { get; set; } = string.Empty;
+    public string? EditedPath { get; set; }
+    public string? EditedSha256 { get; set; }
+    public DateTimeOffset? EditedAtUtc { get; set; }
     public string? SourcePath { get; set; }
     public DateTimeOffset? SourceLastWriteUtc { get; set; }
     public string OriginalFileName { get; set; } = string.Empty;
@@ -185,3 +193,4 @@ public sealed class AuditEntry
     public string? DetailsJson { get; set; }
     public DateTimeOffset OccurredAtUtc { get; set; }
 }
+
