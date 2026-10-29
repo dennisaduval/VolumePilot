@@ -274,7 +274,8 @@ public sealed class MainWindowStartupTests
                         Assert.True(action.FindControl<Button>("MonitorButton")!.IsEnabled);
                         Assert.Contains("verified", action.FindControl<TextBlock>("ActionClockStatus")!.Text!);
                         action.Show();
-                        PumpUntil(() => action.FindControl<ComboBox>("SavedJobs")!.Items.Count == 1 && action.FindControl<Button>("MonitorButton")!.IsEnabled);
+                        PumpUntil(() => action.FindControl<ComboBox>("SavedJobs")!.Items.Count == 1 && action.FindControl<Button>("MonitorButton")!.IsEnabled,
+                            () => $"Action loaded={action.IsLoaded}, saved jobs={action.FindControl<ComboBox>("SavedJobs")!.Items.Count}, status={action.FindControl<TextBlock>("Status")!.Text}");
                         var photo = Path.Combine(incoming, "copied-old-timestamp.jpg");
                         File.WriteAllBytes(photo, [255,216,255,1]); File.SetLastWriteTimeUtc(photo, DateTime.UtcNow.AddYears(-1));
                         void Metadata(string path, string key, long time, string camera = "r6-ui") => Complete(actionController.ActionAsync(service => service.ReceiveSmartShooterAsync(jobId,
@@ -346,12 +347,12 @@ public sealed class MainWindowStartupTests
             Directory.Delete(root, recursive: true);
         }
     }
-    private static void PumpUntil(Func<bool> done)
+    private static void PumpUntil(Func<bool> done, Func<string>? diagnostics = null)
     {
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         while (!done() && elapsed.Elapsed < TimeSpan.FromSeconds(15))
-        { Dispatcher.UIThread.RunJobs(); Thread.Sleep(5); }
-        Assert.True(done(), "Timed out waiting for UI/background work.");
+        { Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Thread.Sleep(5); }
+        Assert.True(done(), "Timed out waiting for UI/background work. " + diagnostics?.Invoke());
     }
     private static void Complete(Task task)
     {
