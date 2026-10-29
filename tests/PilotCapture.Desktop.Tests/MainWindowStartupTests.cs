@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using PilotCapture.Desktop;
 using PilotCapture.Infrastructure.Persistence;
 using Xunit;
@@ -112,6 +113,30 @@ public sealed class MainWindowStartupTests
                     Assert.Contains(new string('x', 70), cameraLabel.Text!);
                     Assert.Equal(Avalonia.Media.TextWrapping.Wrap, fileLabel.TextWrapping);
                     Assert.Contains("PRIMARY", stateLabel.Text!); Assert.True(fileLabel.Bounds.Width <= 280);
+                    // Reproduce an older bare copy while role/rejection/pending flags
+                    // stay unchanged. Pressing Primary must repair disk AND refresh its name.
+                    var markedOutput = previewPhoto.IndividualDeliveredPath!;
+                    var bareOutput = markedOutput[..^"_Primary.jpg".Length] + ".jpg";
+                    var cancellationToken = TestContext.Current.CancellationToken;
+                    Complete(Task.Run(async () =>
+                    {
+                        using var repairScope = provider.CreateScope();
+                        var repairDb = repairScope.ServiceProvider.GetRequiredService<PilotCaptureDbContext>();
+                        var old = await repairDb.FastImages.SingleAsync(p => p.Id == previewPhoto.Id, cancellationToken);
+                        File.Move(markedOutput, bareOutput); old.IndividualDeliveredPath = bareOutput;
+                        await repairDb.SaveChangesAsync(cancellationToken);
+                    }));
+                    Complete(portraitFast.ImportConfiguredRosterAsync(schedule));
+                    var barePhoto = imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single();
+                    var bareRow = Assert.IsType<StackPanel>(imageList.ItemTemplate!.Build(barePhoto));
+                    Assert.Equal(Path.GetFileName(bareOutput), Assert.IsType<TextBlock>(bareRow.Children[0]).Text);
+                    portraitFast.FindControl<Button>("PrimaryButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    PumpUntil(() => imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single().IndividualDeliveredPath == markedOutput
+                        && portraitFast.FindControl<Button>("PrimaryButton")!.IsEnabled);
+                    var markedPhoto = imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single();
+                    var markedRow = Assert.IsType<StackPanel>(imageList.ItemTemplate!.Build(markedPhoto));
+                    Assert.EndsWith("_Primary.jpg", Assert.IsType<TextBlock>(markedRow.Children[0]).Text!);
+                    Assert.True(File.Exists(markedOutput)); Assert.False(File.Exists(bareOutput));
                     portraitFast.FindControl<Slider>("CloseupZoom")!.Value = 4;
                     closeup.Center = new Point(0.5, 0.4);
                     File.WriteAllBytes(Path.Combine(incoming, "next-portrait.jpg"), Convert.FromBase64String(PortraitPreviewTests.LandscapeJpeg));
