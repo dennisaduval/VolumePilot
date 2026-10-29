@@ -1,0 +1,15 @@
+ALTER TABLE fast_capture_jobs ADD COLUMN action_timing_enabled INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE action_changeovers (id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES fast_capture_jobs(id), team_id TEXT NOT NULL REFERENCES fast_capture_teams(id), utc_ticks INTEGER NOT NULL);
+CREATE INDEX ix_action_changeovers_job_time ON action_changeovers(job_id,utc_ticks);
+CREATE TABLE action_cameras (id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES fast_capture_jobs(id), camera_key TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL, last_seen_utc_ticks INTEGER NOT NULL, last_photo_utc_ticks INTEGER NOT NULL, issue TEXT NOT NULL);
+CREATE UNIQUE INDEX ix_action_camera_key ON action_cameras(job_id,camera_key);
+CREATE TABLE action_clock_samples (id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES fast_capture_jobs(id), camera_key TEXT NOT NULL, from_utc_ticks INTEGER NOT NULL, until_utc_ticks INTEGER NOT NULL, offset_ticks INTEGER NOT NULL, uncertainty_ticks INTEGER NOT NULL, verification_photo_key TEXT NOT NULL);
+CREATE UNIQUE INDEX ix_action_clock_photo ON action_clock_samples(job_id,verification_photo_key);
+CREATE TABLE action_photo_metadata (id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES fast_capture_jobs(id), photo_key TEXT NOT NULL, camera_key TEXT NOT NULL, path_key TEXT NOT NULL, camera_ticks INTEGER NULL, origin TEXT NOT NULL, location TEXT NOT NULL, first_seen_utc_ticks INTEGER NOT NULL, has_conflict INTEGER NOT NULL DEFAULT 0);
+CREATE UNIQUE INDEX ix_action_metadata_photo ON action_photo_metadata(job_id,photo_key);
+CREATE INDEX ix_action_metadata_path ON action_photo_metadata(job_id,path_key);
+CREATE TABLE action_receipts (id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES fast_capture_jobs(id), source_path TEXT NOT NULL, path_key TEXT NOT NULL, source_ticks INTEGER NOT NULL, source_length INTEGER NOT NULL, stored_path TEXT NOT NULL, sha256 TEXT NOT NULL, photo_key TEXT NULL, camera_key TEXT NULL, camera_ticks INTEGER NULL, corrected_utc_ticks INTEGER NULL, clock_sample_id TEXT NULL, team_id TEXT NULL REFERENCES fast_capture_teams(id), state TEXT NOT NULL, issue TEXT NOT NULL);
+CREATE UNIQUE INDEX ix_action_receipt_source ON action_receipts(job_id,path_key,source_ticks,source_length);
+CREATE INDEX ix_action_receipt_state ON action_receipts(job_id,state);
+CREATE INDEX ix_action_receipt_photo ON action_receipts(job_id,photo_key);
+CREATE INDEX ix_fast_pending_delivery ON fast_capture_images(job_id,needs_delivery,id);

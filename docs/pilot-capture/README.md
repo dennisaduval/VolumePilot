@@ -1,5 +1,7 @@
 # Pilot Capture
 
+See [buffered Action capture](action-buffered-capture.md) for SS integration, camera clock verification and capture-time team routing.
+
 For current fast-job day/hall mapping and operator navigation, see [Performance schedule import](schedule-import.md).
 
 ## Purpose

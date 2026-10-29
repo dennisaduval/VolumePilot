@@ -11,6 +11,7 @@ public sealed class FastCaptureJob
     public string? CurrentTeamId { get; set; }
     public long StartedAtTicks { get; set; }
     public string? IgnoredSourceVersionsJson { get; set; }
+    public bool ActionTimingEnabled { get; set; }
 }
 public sealed class FastCaptureTeam
 {

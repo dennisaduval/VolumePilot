@@ -1,5 +1,7 @@
 # Immediate-output capture jobs
 
+For Action bursts and delayed transfers, [buffered Action capture](action-buffered-capture.md) supersedes the earlier drain-before-switch rule when SS timing is enabled. Print modes retain their existing boundary behavior.
+
 The current [performance schedule import](schedule-import.md) adds day/hall selection, per-schedule navigation, optional Entry Type mapping and values-only choice labels. It extends and supersedes the earlier unscoped schedule presentation below.
 
 Dennis's hardware feedback and revised requirements, 28 October 2026, replace the assumption that every job should use roster-driven portrait review. The intro screen asks which of five jobs is being shot. These workflows extend the existing local-first SQLite/file architecture; they do not use CSV exports or the portrait role engine.

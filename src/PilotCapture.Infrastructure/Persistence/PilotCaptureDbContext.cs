@@ -26,6 +26,12 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
     public DbSet<FastCaptureRosterImport> FastRosterImports => Set<FastCaptureRosterImport>();
     public DbSet<FastCaptureImage> FastImages => Set<FastCaptureImage>();
 
+    public DbSet<ActionChangeover> ActionChangeovers => Set<ActionChangeover>();
+    public DbSet<ActionCamera> ActionCameras => Set<ActionCamera>();
+    public DbSet<ActionClockSample> ActionClockSamples => Set<ActionClockSample>();
+    public DbSet<ActionPhotoMetadata> ActionPhotoMetadatas => Set<ActionPhotoMetadata>();
+    public DbSet<ActionReceipt> ActionReceipts => Set<ActionReceipt>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Event>(entity =>
@@ -204,6 +210,11 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
         });
 
         modelBuilder.Entity<FastCaptureJob>(e => { e.ToTable("fast_capture_jobs"); e.HasKey(x => x.Id); });
+        modelBuilder.Entity<ActionChangeover>(e => { e.ToTable("action_changeovers"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.UtcTicks }); });
+        modelBuilder.Entity<ActionCamera>(e => { e.ToTable("action_cameras"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.CameraKey }).IsUnique(); });
+        modelBuilder.Entity<ActionClockSample>(e => { e.ToTable("action_clock_samples"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.VerificationPhotoKey }).IsUnique(); });
+        modelBuilder.Entity<ActionPhotoMetadata>(e => { e.ToTable("action_photo_metadata"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.PhotoKey }).IsUnique(); e.HasIndex(x => new { x.JobId, x.PathKey }); });
+        modelBuilder.Entity<ActionReceipt>(e => { e.ToTable("action_receipts"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.PathKey, x.SourceTicks, x.SourceLength }).IsUnique(); e.HasIndex(x => new { x.JobId, x.State }); });
         modelBuilder.Entity<FastCaptureTeam>(e =>
         {
             e.ToTable("fast_capture_teams"); e.HasKey(x => x.Id);

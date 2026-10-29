@@ -56,11 +56,12 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         return job.Id;
     }
 
-    public async Task SelectTeamAsync(string jobId, string name, CancellationToken token = default)
+    public async Task SelectTeamAsync(string jobId, string name, CancellationToken token = default, long? changeoverUtcTicks = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Enter a team name.");
-        if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching teams.");
+        var boundaryTime = changeoverUtcTicks ?? DateTime.UtcNow.Ticks;
         var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
+        if (!job.ActionTimingEnabled && !await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching teams.");
         var current = await db.FastTeams.FirstOrDefaultAsync(x => x.Id == job.CurrentTeamId, token);
         var day = current?.Day ?? ""; var hall = current?.Hall ?? "";
         var matches = await db.FastTeams.Where(x => x.JobId == jobId && x.Name == name.Trim() && x.Day == day && x.Hall == hall).OrderBy(x => x.SortOrder).ToListAsync(token);
@@ -82,6 +83,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
             db.FastTeams.Add(team);
         }
         job.CurrentTeamId = team.Id;
+        if (job.ActionTimingEnabled) db.ActionChangeovers.Add(new() { JobId = jobId, TeamId = team.Id, UtcTicks = boundaryTime });
         await db.SaveChangesAsync(token);
     }
 
@@ -141,10 +143,16 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         await DeliverAsync(job, token);
     }
 
-    public async Task<bool> ScanAsync(string jobId, CancellationToken token = default)
+    public async Task<bool> ScanAsync(string jobId, CancellationToken token = default, IReadOnlyList<string>? actionPaths = null)
     {
         var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
         if (job.CurrentTeamId is null) return true;
+        if (job.JobType == CaptureJobType.ActionPhotography && job.ActionTimingEnabled)
+        {
+            var settledAction = await new ActionCaptureService(db, mediaRoot).ScanAsync(job, token, actionPaths);
+            await DeliverAsync(job, token);
+            return settledAction;
+        }
         var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
         var settled = true;
         var imported = await db.FastImages.AsNoTracking().Where(x => x.JobId == jobId)
@@ -196,16 +204,16 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         await db.SaveChangesAsync(token);
     }
 
-    public async Task SelectScheduleAsync(string jobId, string day, string hall, CancellationToken token = default)
+    public async Task SelectScheduleAsync(string jobId, string day, string hall, CancellationToken token = default, long? changeoverUtcTicks = null)
     {
         var snapshot = await GetSnapshotAsync(jobId, token);
         var schedule = FastPerformanceSearch.Schedule(snapshot.Teams, day, hall);
         var team = schedule.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId) ?? schedule.FirstOrDefault()
             ?? throw new ArgumentException("Choose a day and hall from this job's schedule.");
-        await SelectPerformanceAsync(jobId, team.Id, token);
+        await SelectPerformanceAsync(jobId, team.Id, token, changeoverUtcTicks);
     }
 
-    public async Task NextPerformanceAsync(string jobId, CancellationToken token = default)
+    public async Task NextPerformanceAsync(string jobId, CancellationToken token = default, long? changeoverUtcTicks = null)
     {
         var snapshot = await GetSnapshotAsync(jobId, token);
         var current = snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId)
@@ -213,13 +221,14 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         var schedule = FastPerformanceSearch.Schedule(snapshot.Teams, current.Day, current.Hall).ToList();
         var index = schedule.FindIndex(t => t.Id == current.Id);
         if (index + 1 >= schedule.Count) throw new InvalidOperationException("This is the last performance in the selected day and hall.");
-        await SelectPerformanceAsync(jobId, schedule[index + 1].Id, token);
+        await SelectPerformanceAsync(jobId, schedule[index + 1].Id, token, changeoverUtcTicks);
     }
 
-    public async Task SelectPerformanceAsync(string jobId, string teamId, CancellationToken token = default)
+    public async Task SelectPerformanceAsync(string jobId, string teamId, CancellationToken token = default, long? changeoverUtcTicks = null)
     {
-        if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching performances.");
+        var boundaryTime = changeoverUtcTicks ?? DateTime.UtcNow.Ticks;
         var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
+        if (!job.ActionTimingEnabled && !await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching performances.");
         if (!await db.FastTeams.AnyAsync(x => x.Id == teamId && x.JobId == jobId, token)) throw new ArgumentException("Choose a performance from this job.");
         if (job.CurrentTeamId == teamId)
         {
@@ -228,6 +237,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         }
         if (job.CurrentTeamId is not null && job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual) await NextPlayerAsync(jobId, token);
         job.CurrentTeamId = teamId;
+        if (job.ActionTimingEnabled) db.ActionChangeovers.Add(new() { JobId = jobId, TeamId = teamId, UtcTicks = boundaryTime });
         await db.SaveChangesAsync(token);
         if (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual) await RepairPrimaryFilenameAsync(jobId, token);
     }
@@ -303,7 +313,11 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
             SourceDataJson = JsonSerializer.Serialize(plan.Raw),
             MappingJson = JsonSerializer.Serialize(new { command.TeamColumn, command.GroupColumn, command.OrderColumn, command.DetailColumns, command.HeaderRecordNumber, command.DayColumn, command.HallColumn, command.EntryTypeColumn })
         });
-        job.CurrentTeamId ??= teams.OrderBy(x => x.SortOrder).First().Id;
+        if (job.CurrentTeamId is null)
+        {
+            job.CurrentTeamId = teams.OrderBy(x => x.SortOrder).First().Id;
+            if (job.ActionTimingEnabled) db.ActionChangeovers.Add(new() { JobId = job.Id, TeamId = job.CurrentTeamId, UtcTicks = DateTime.UtcNow.Ticks });
+        }
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         return new(entries.Count, plan.Rows);
@@ -326,7 +340,8 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
 
     private async Task DeliverAsync(FastCaptureJob job, CancellationToken token)
     {
-        var images = await db.FastImages.Where(x => x.JobId == job.Id && x.NeedsDelivery).OrderBy(x => x.Sequence).ToListAsync(token);
+        var pending = db.FastImages.Where(x => x.JobId == job.Id && x.NeedsDelivery).OrderBy(x => x.Id);
+        var images = await (job.ActionTimingEnabled ? pending.Take(8) : pending).ToListAsync(token);
         var teams = await db.FastTeams.Where(x => x.JobId == job.Id).ToDictionaryAsync(x => x.Id, token);
         foreach (var image in images)
         {

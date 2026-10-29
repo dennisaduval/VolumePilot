@@ -29,6 +29,8 @@ public static class InfrastructureRegistration
         services.AddScoped<DatabaseInitializer>();
         services.AddScoped<PilotCapture.Application.FastCapture.IFastCaptureService>(provider =>
             new FastCaptureService(provider.GetRequiredService<PilotCaptureDbContext>(), mediaRootPath));
+        services.AddScoped<PilotCapture.Application.FastCapture.IActionCaptureService>(provider =>
+            new ActionCaptureService(provider.GetRequiredService<PilotCaptureDbContext>(), mediaRootPath));
         services.AddTransient<FastCaptureController>();
         services.AddScoped<IRosterImportService, RosterImportService>();
         services.AddScoped<IRosterExportService, RosterExportService>();

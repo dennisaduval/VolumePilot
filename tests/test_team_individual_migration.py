@@ -37,6 +37,23 @@ class TeamIndividualMigrationTests(unittest.TestCase):
         db.close()
 
 class FastCaptureMigrationTests(unittest.TestCase):
+    def test_action_timing_upgrade_preserves_existing_jobs_and_enforces_receipt_identity(self):
+        db = sqlite3.connect(':memory:')
+        db.execute('PRAGMA foreign_keys=ON')
+        for path in sorted(MIGRATIONS.glob('*.sql')):
+            if path.name < '0012':
+                db.executescript(path.read_text())
+        db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,started_at_ticks) VALUES ('job','Action',3,'source','output',0)")
+        db.execute("INSERT INTO fast_capture_teams(id,job_id,name,folder_name,current_player) VALUES ('team','job','A','Old_A',1)")
+        db.executescript((MIGRATIONS / '0012_action_capture_timing.sql').read_text())
+        self.assertEqual((0,), db.execute('SELECT action_timing_enabled FROM fast_capture_jobs').fetchone())
+        self.assertEqual(('Old_A',), db.execute('SELECT folder_name FROM fast_capture_teams').fetchone())
+        db.execute("INSERT INTO action_receipts(id,job_id,source_path,path_key,source_ticks,source_length,stored_path,sha256,state,issue) VALUES ('photo','job','source.jpg','SOURCE.JPG',1,4,'archive.jpg','hash','Held','metadata')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO action_receipts(id,job_id,source_path,path_key,source_ticks,source_length,stored_path,sha256,state,issue) VALUES ('other','job','source.jpg','SOURCE.JPG',1,4,'archive.jpg','hash','Held','metadata')")
+        self.assertEqual([], db.execute('PRAGMA foreign_key_check').fetchall())
+        db.close()
+
     def test_day_hall_upgrade_retains_previous_output_and_unscoped_schedule(self):
         db = sqlite3.connect(':memory:')
         for path in sorted(MIGRATIONS.glob('*.sql')):

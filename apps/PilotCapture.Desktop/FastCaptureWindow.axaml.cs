@@ -34,7 +34,8 @@ public sealed partial class FastCaptureWindow : Window
     private bool UsesPlayers => _type == CaptureJobType.PrintOnSiteTeamAndIndividual;
     public FastCaptureWindow(CaptureJobType type, FastCaptureController controller)
     {
-        _type = type; _controller = controller; InitializeComponent();
+        _type = type; _controller = controller; _controller.ActionMode = type == CaptureJobType.ActionPhotography; InitializeComponent();
+        ActionSetup.IsVisible = _controller.ActionMode;
         ImagesList.ItemTemplate = new FuncDataTemplate<FastCaptureImage>((image, _) => image is null ? null : ImageRow(image));
         TeamSuggestions.PlacementTarget = TeamName;
         PerformanceSuggestions.AddHandler(InputElement.PointerReleasedEvent, OnSuggestionPicked, RoutingStrategies.Bubble, handledEventsToo: true);
@@ -108,6 +109,18 @@ public sealed partial class FastCaptureWindow : Window
             RenderPlayerSlots(team);
             ImageListTitle.Text = UsesPlayers && team is not null ? $"Player {team.CurrentPlayer} images" : "Incoming images";
             PhotoCount.Text = UsesPlayers && team is not null ? $"{_snapshot.Images.Count} image(s) · Player {team.CurrentPlayer}" : $"{_snapshot.Images.Count} recent image(s)";
+            if (_controller.ActionMode)
+            {
+                var action = await _controller.ActionAsync(s => s.GetStatusAsync(job.Id));
+                ActionClockStatus.Text = _controller.ActionConnectionStatus + "\n" + string.Join(" · ", action.Cameras.Select(camera =>
+                {
+                    var clock = action.Clocks.Where(c => c.CameraKey == camera.CameraKey && c.UntilUtcTicks > DateTime.UtcNow.Ticks).OrderByDescending(c => c.FromUtcTicks).FirstOrDefault();
+                    return $"{(camera.Name.Length > 0 ? camera.Name : camera.CameraKey)}: " + (clock is null ? "verification needed" : $"verified, correction {TimeSpan.FromTicks(clock.OffsetTicks).TotalSeconds:0.0}s") +
+                        (camera.Issue.Length > 0 ? " (" + camera.Issue + ")" : "");
+                }));
+                ActionTransferStatus.Text = $"{action.HeldCount} held for review. Camera buffer total is unknown.\n" +
+                    string.Join(" · ", action.Progress.Select(p => $"{p.Team}: {p.Delivered} delivered, {p.Pending} pending"));
+            }
             var signature = job.CurrentTeamId + ":" + (UsesPlayers ? team?.CurrentPlayer : 0) + "|" +
                 string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}:{x.IndividualDeliveredPath}:{x.DeliveredPath}"));
             if (_displaySignature != signature)
@@ -131,7 +144,7 @@ public sealed partial class FastCaptureWindow : Window
     private void UpdateButtons()
     {
         MonitorButton.Content = _controller.IsRunning ? "Pause watching" : "Start watching";
-        MonitorButton.IsEnabled = !_busy && _jobId is not null && _snapshot?.Job.CurrentTeamId is not null;
+        MonitorButton.IsEnabled = !_busy && _jobId is not null && _snapshot?.Job.CurrentTeamId is not null && (!_controller.ActionMode || _snapshot.Job.ActionTimingEnabled);
         NextPlayerButton.IsEnabled = !_busy && _snapshot?.Job.CurrentTeamId is not null;
         PrimaryButton.IsEnabled = !_busy && UsesPlayers && SelectedImage() is not null;
         RejectButton.IsEnabled = !_busy && SelectedImage() is not null;
@@ -142,6 +155,7 @@ public sealed partial class FastCaptureWindow : Window
         NextPerformanceButton.IsEnabled = !_busy && _snapshot is { Teams.Count: > 0 };
         PlayerSlots.IsEnabled = !_busy;
         ScheduleDays.IsEnabled = ScheduleHalls.IsEnabled = !_busy;
+        ConnectActionButton.IsEnabled = VerifyActionButton.IsEnabled = ReviewActionButton.IsEnabled = !_busy && _jobId is not null;
     }
     private async Task ShowPreviewAsync()
     {
@@ -201,13 +215,13 @@ public sealed partial class FastCaptureWindow : Window
         var jobId = _jobs[SavedJobs.SelectedIndex].Id;
         await RunAsync(async () =>
         {
-            await _controller.StopAsync(); _jobId = jobId; _displaySignature = null; ClearTeamSearch();
+            await _controller.StopAsync(); await _controller.DisconnectActionAsync(); _jobId = jobId; _displaySignature = null; ClearTeamSearch();
             if (UsesPlayers) await _controller.ExecuteAsync(s => s.RepairPrimaryFilenameAsync(jobId));
         });
     }
     private async void OnNewJobClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        await _controller.StopAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
+        await _controller.StopAsync(); await _controller.DisconnectActionAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
         Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
         CurrentPlayer.Text = PhotoCount.Text = ActivePerformance.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; ClearTeamSearch();
@@ -220,20 +234,25 @@ public sealed partial class FastCaptureWindow : Window
         var jobId = _snapshot.Job.Id; var teamId = _visibleTeams[Teams.SelectedIndex].Id;
         await SelectPerformanceAsync(jobId, teamId);
     }
-    private Task SelectPerformanceAsync(string jobId, string teamId) => RunAsync(async () =>
+    private Task SelectPerformanceAsync(string jobId, string teamId)
     {
-        await _controller.ExecuteAsync(s => s.SelectPerformanceAsync(jobId, teamId));
-        ClearTeamSearch();
-    });
+        var at = DateTime.UtcNow.Ticks;
+        return RunAsync(async () =>
+        {
+            await _controller.ExecuteAsync(s => s.SelectPerformanceAsync(jobId, teamId, changeoverUtcTicks: at));
+            ClearTeamSearch();
+        });
+    }
     private Task SelectOrAddTeamAsync() => RunAsync(async () =>
     {
         if (_snapshot is not { } snapshot) return;
+        var at = DateTime.UtcNow.Ticks;
         var name = TeamName.Text?.Trim() ?? "";
         if (name.Length == 0) throw new ArgumentException("Type a team name or performance number.");
         var matches = FastPerformanceSearch.Find(ScheduleTeams(snapshot), name);
         if (matches.Count > 1) throw new ArgumentException("Several teams match. Choose the performance / division in the list.");
-        if (matches.Count == 1) await _controller.ExecuteAsync(s => s.SelectPerformanceAsync(snapshot.Job.Id, matches[0].Id));
-        else await _controller.ExecuteAsync(s => s.SelectTeamAsync(snapshot.Job.Id, name));
+        if (matches.Count == 1) await _controller.ExecuteAsync(s => s.SelectPerformanceAsync(snapshot.Job.Id, matches[0].Id, changeoverUtcTicks: at));
+        else await _controller.ExecuteAsync(s => s.SelectTeamAsync(snapshot.Job.Id, name, changeoverUtcTicks: at));
         ClearTeamSearch();
     });
     private void OnTeamSearchChanged(object? sender, TextChangedEventArgs e)
@@ -325,13 +344,15 @@ public sealed partial class FastCaptureWindow : Window
         var halls = Choices(snapshot.Teams.Where(t => t.Day.Equals(day, StringComparison.OrdinalIgnoreCase)).Select(t => t.Hall));
         var hall = halls.FirstOrDefault(h => h.Equals(current?.Hall, StringComparison.OrdinalIgnoreCase)) ?? halls.FirstOrDefault();
         if (hall is null) return;
-        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.SelectScheduleAsync(snapshot.Job.Id, day, hall)); ClearTeamSearch(); });
+        var at = DateTime.UtcNow.Ticks;
+        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.SelectScheduleAsync(snapshot.Job.Id, day, hall, changeoverUtcTicks: at)); ClearTeamSearch(); });
     }
     private async void OnScheduleHallChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_settingChoices || _snapshot is not { } snapshot || ScheduleHalls.SelectedItem is not ComboBoxItem { Tag: string hall }) return;
         var day = snapshot.Teams.FirstOrDefault(t => t.Id == snapshot.Job.CurrentTeamId)?.Day ?? "";
-        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.SelectScheduleAsync(snapshot.Job.Id, day, hall)); ClearTeamSearch(); });
+        var at = DateTime.UtcNow.Ticks;
+        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.SelectScheduleAsync(snapshot.Job.Id, day, hall, changeoverUtcTicks: at)); ClearTeamSearch(); });
     }
     private static string ImageState(FastCaptureImage image) =>
         (image.PlayerNumber > 0 ? $"Player {image.PlayerNumber} · " : "") + $"{image.Sequence:0000} · " +
@@ -346,6 +367,19 @@ public sealed partial class FastCaptureWindow : Window
             FontWeight = FontWeight.SemiBold, Foreground = image.IsRejected ? Brushes.Firebrick : Brushes.DarkBlue });
         ToolTip.SetTip(row, (output ?? "No output copy acknowledged yet") + "\nCamera: " + Path.GetFileName(image.SourcePath));
         return row;
+    }
+    private async void OnConnectActionClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (_jobId is { } jobId) await _controller.ConnectActionAsync(jobId);
+    });
+    private void OnVerifyActionClick(object? sender, RoutedEventArgs e) => _controller.VerifyActionCameras(RepeatActionClockChecks.IsChecked == true);
+    private void OnRepeatActionClockChecksChanged(object? sender, RoutedEventArgs e) => _controller.SetRepeatActionClockChecks(RepeatActionClockChecks.IsChecked == true);
+    private async void OnReviewActionClick(object? sender, RoutedEventArgs e)
+    {
+        if (_snapshot is not { } snapshot) return;
+        var review = new ActionHeldWindow(_controller, snapshot);
+        await review.ShowDialog(this);
+        await RefreshAfterActionAsync();
     }
     private async void OnMonitorClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
@@ -402,7 +436,8 @@ public sealed partial class FastCaptureWindow : Window
     private async void OnNextPerformanceClick(object? sender, RoutedEventArgs e)
     {
         if (_snapshot is not { } snapshot) return;
-        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.NextPerformanceAsync(snapshot.Job.Id)); ClearTeamSearch(); });
+        var at = DateTime.UtcNow.Ticks;
+        await RunAsync(async () => { await _controller.ExecuteAsync(s => s.NextPerformanceAsync(snapshot.Job.Id, changeoverUtcTicks: at)); ClearTeamSearch(); });
     }
     private async void OnImportRosterClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
