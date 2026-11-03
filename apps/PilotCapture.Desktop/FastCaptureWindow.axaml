@@ -1,0 +1,91 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:PilotCapture.Desktop"
+        x:Class="PilotCapture.Desktop.FastCaptureWindow" Title="VolumePilot | Pilot Capture"
+        Width="1280" Height="900" MinWidth="1000" MinHeight="760" Background="#F5F7FA" FontFamily="Segoe UI">
+  <Window.Styles><Style Selector="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style></Window.Styles>
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12" Margin="24">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+      <StackPanel Spacing="4"><TextBlock Text="PILOT CAPTURE" FontSize="14" Foreground="#175CD3" /><TextBlock x:Name="ModeTitle" FontSize="28" FontWeight="SemiBold" /></StackPanel>
+      <Button Grid.Column="1" x:Name="ImportRosterButton" Content="Import roster / performance order…" Click="OnImportRosterClick" />
+      <Button Grid.Column="2" Content="Choose another job type" Click="OnReturnClick" />
+    </Grid>
+    <StackPanel Grid.Row="1" Spacing="8">
+    <Expander x:Name="SetupPanel" Header="Job and folder setup" IsExpanded="True">
+      <StackPanel Spacing="8" Margin="0,8">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><ComboBox x:Name="SavedJobs" PlaceholderText="Resume a saved job" SelectionChanged="OnSavedJobChanged" /><Button Grid.Column="1" Content="New job" Click="OnNewJobClick" /></Grid>
+        <TextBox x:Name="JobName" PlaceholderText="Job name" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="SourcePath" IsReadOnly="True" PlaceholderText="Incoming Smart Shooter hot folder" /><Button Grid.Column="1" Content="Choose hot folder…" Click="OnSourceFolderClick" /></Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="OutputPath" IsReadOnly="True" PlaceholderText="Watched team output folder" /><Button Grid.Column="1" Content="Choose team output…" Click="OnOutputFolderClick" /></Grid>
+        <Grid x:Name="IndividualsSetup" ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="IndividualsPath" IsReadOnly="True" PlaceholderText="Separate individual images output folder" /><Button Grid.Column="1" Content="Choose individual output…" Click="OnIndividualsFolderClick" /></Grid>
+        <CheckBox x:Name="IncludeExistingPhotos" Content="Also process JPEGs already in the hot folder when starting" />
+        <Button Classes="primary-action" x:Name="SaveJobButton" Content="Create job" Click="OnCreateJobClick" />
+      </StackPanel>
+    </Expander>
+    </StackPanel>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+      <Grid x:Name="ScheduleFilters" Grid.ColumnSpan="3" ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="12" IsVisible="False">
+        <TextBlock Text="Day" VerticalAlignment="Center" FontSize="20" />
+        <ComboBox Grid.Column="1" x:Name="ScheduleDays" SelectionChanged="OnScheduleDayChanged" FontSize="20" MinHeight="48" HorizontalAlignment="Stretch" />
+        <TextBlock Grid.Column="2" Text="Hall" VerticalAlignment="Center" FontSize="20" />
+        <ComboBox Grid.Column="3" x:Name="ScheduleHalls" SelectionChanged="OnScheduleHallChanged" FontSize="20" MinHeight="48" HorizontalAlignment="Stretch" />
+      </Grid>
+      <TextBox Grid.Row="1" x:Name="TeamName" PlaceholderText="Search team, performance number or division" FontSize="22" TextChanged="OnTeamSearchChanged" KeyDown="OnTeamSearchKeyDown" />
+      <Popup x:Name="TeamSuggestions" Placement="Bottom" IsLightDismissEnabled="True">
+        <Border Background="White" BorderBrush="#175CD3" BorderThickness="1" Padding="4">
+          <ListBox x:Name="PerformanceSuggestions" MaxHeight="280" FontSize="20" KeyDown="OnSuggestionKeyDown" />
+        </Border>
+      </Popup>
+      <Button Grid.Row="1" Grid.Column="1" Content="Add / select team" Click="OnSwitchTeamClick" FontSize="20" />
+      <Button Grid.Row="1" Grid.Column="2" Classes="primary-action" x:Name="MonitorButton" Content="Start watching" Click="OnMonitorClick" FontSize="20" />
+      <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="4">
+        <ComboBox x:Name="Teams" SelectionChanged="OnTeamChanged" FontSize="20" HorizontalAlignment="Stretch" MaxDropDownHeight="300" />
+        <TextBlock x:Name="ActivePerformance" FontSize="15" TextWrapping="Wrap" />
+      </StackPanel>
+      <StackPanel Grid.Row="2" Grid.Column="2"><Button x:Name="NextPerformanceButton" Content="Next team / performance" Click="OnNextPerformanceClick" /><TextBlock x:Name="PhotoCount" FontSize="14" /></StackPanel>
+    </Grid>
+    <Grid Grid.Row="3" ColumnDefinitions="190,*,1.1*" ColumnSpacing="16">
+      <Grid x:Name="PlayerPanel" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="8">
+        <TextBlock x:Name="PlayerTeamName" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <TextBlock Grid.Row="1" x:Name="CurrentPlayer" FontSize="24" FontWeight="SemiBold" />
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"><WrapPanel x:Name="PlayerSlots" ItemWidth="88" ItemHeight="52" /></ScrollViewer>
+        <Button Grid.Row="3" Classes="forward-action" x:Name="NextPlayerButton" Content="Next Player" MinHeight="72" FontSize="22" Click="OnNextPlayerClick" />
+      </Grid>
+      <Grid x:Name="CaptureControls" Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="10">
+        <StackPanel Spacing="8">
+          <TextBlock x:Name="ImageListTitle" Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
+          <StackPanel x:Name="ActionSetup" IsVisible="False" Spacing="6">
+            <WrapPanel>
+              <Button x:Name="ConnectActionButton" Content="Connect SS" Click="OnConnectActionClick" MinHeight="48" Margin="0,0,8,0" />
+              <Button x:Name="VerifyActionButton" Content="Verify cameras (takes test photos)" Click="OnVerifyActionClick" MinHeight="48" Margin="0,0,8,0" />
+              <Button x:Name="ReviewActionButton" Content="Review held photos" Click="OnReviewActionClick" MinHeight="48" />
+            </WrapPanel>
+            <CheckBox x:Name="RepeatActionClockChecks" IsChecked="True" IsCheckedChanged="OnRepeatActionClockChecksChanged" Content="Repeat verification every 15 minutes when idle (takes test photos)" />
+            <TextBlock x:Name="ActionClockStatus" TextWrapping="Wrap" FontSize="16" />
+            <TextBlock x:Name="ActionTransferStatus" TextWrapping="Wrap" FontSize="16" />
+          </StackPanel>
+        </StackPanel>
+        <ListBox Grid.Row="1" x:Name="ImagesList" SelectionChanged="OnImageChanged" HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+        <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
+          <Button x:Name="PrimaryButton" Content="Primary" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnPrimaryClick" />
+          <Button Grid.Column="1" x:Name="RejectButton" Content="Reject" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnRejectClick" />
+        </Grid>
+      </Grid>
+      <Border x:Name="PreviewPanel" Grid.Column="2" Background="#0B1F3A" CornerRadius="8" Padding="10">
+        <Grid RowDefinitions="*,Auto,Auto" RowSpacing="8">
+          <Grid ColumnDefinitions="80,*" ColumnSpacing="10">
+            <StackPanel Spacing="8">
+              <Image x:Name="Preview" Stretch="Uniform" Height="120" PointerPressed="OnPreviewPointerPressed" PointerMoved="OnPreviewPointerMoved" />
+              <TextBlock Text="Tap the head to position the closeup." Foreground="White" TextWrapping="Wrap" />
+            </StackPanel>
+            <local:PortraitCropView Grid.Column="1" x:Name="Closeup" />
+          </Grid>
+          <TextBlock Grid.Row="1" x:Name="PreviewImageStatus" Foreground="White" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+          <Grid Grid.Row="2" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+            <Button Content="Turn 180°" Click="OnInvertPreviewClick" MinHeight="48" VerticalAlignment="Bottom" />
+            <StackPanel Grid.Column="1"><TextBlock Text="Closeup zoom" Foreground="White" /><Slider x:Name="CloseupZoom" Minimum="1" Maximum="6" Value="3" ValueChanged="OnCloseupZoomChanged" MinHeight="44" /></StackPanel>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+    <Border Grid.Row="4" Background="White" Padding="12"><TextBlock x:Name="Status" Text="Create or resume a job, select a team, then start watching." FontSize="17" TextWrapping="Wrap" /></Border>
+  </Grid>
+</Window>

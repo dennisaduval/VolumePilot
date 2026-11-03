@@ -1,0 +1,7 @@
+CREATE TABLE fast_capture_jobs (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, job_type INTEGER NOT NULL, source_folder TEXT NOT NULL, output_folder TEXT NOT NULL, individuals_folder TEXT NULL, current_team_id TEXT NULL, started_at_ticks INTEGER NOT NULL);
+CREATE TABLE fast_capture_teams (id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES fast_capture_jobs(id), name TEXT NOT NULL COLLATE NOCASE, folder_name TEXT NOT NULL COLLATE NOCASE, current_player INTEGER NOT NULL DEFAULT 1);
+CREATE UNIQUE INDEX ix_fast_team_name ON fast_capture_teams(job_id,name);
+CREATE UNIQUE INDEX ix_fast_team_folder ON fast_capture_teams(job_id,folder_name);
+CREATE TABLE fast_capture_images (id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES fast_capture_jobs(id), team_id TEXT NOT NULL REFERENCES fast_capture_teams(id), player_number INTEGER NOT NULL, sequence INTEGER NOT NULL, source_path TEXT NOT NULL COLLATE NOCASE, source_ticks INTEGER NOT NULL, source_length INTEGER NOT NULL, stored_path TEXT NOT NULL, sha256 TEXT NOT NULL, is_primary INTEGER NOT NULL, is_rejected INTEGER NOT NULL, released INTEGER NOT NULL, needs_delivery INTEGER NOT NULL DEFAULT 1, delivered_path TEXT NULL);
+CREATE UNIQUE INDEX ix_fast_source ON fast_capture_images(job_id,source_path,source_ticks,source_length);
+CREATE UNIQUE INDEX ix_fast_primary ON fast_capture_images(team_id,player_number) WHERE is_primary = 1;

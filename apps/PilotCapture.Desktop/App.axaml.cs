@@ -35,15 +35,64 @@ public sealed partial class App : Avalonia.Application
             }
 
             _windowScope = _serviceProvider.CreateScope();
-            desktop.MainWindow = new MainWindow(
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageReviewService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssociationExportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterExportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>());
+            ShowChooser();
+            void ReplaceWindow(Avalonia.Controls.Window window)
+            {
+                var previous = desktop.MainWindow;
+                desktop.MainWindow = window;
+                window.Show();
+                previous?.Close();
+            }
+            void ShowChooser()
+            {
+                var chooser = new JobChooserWindow();
+                chooser.JobSelected += type =>
+                {
+                    var fast = new FastCaptureWindow(type, _windowScope!.ServiceProvider.GetRequiredService<FastCaptureController>());
+                    fast.ReturnRequested += ShowChooser;
+                    ReplaceWindow(fast);
+                };
+                chooser.LegacySelected += () => ShowRosterWorkspace(false);
+                chooser.TeamVolumeSelected += () => ShowRosterWorkspace(true);
+                chooser.ResetLocalDataRequested += async () =>
+                {
+                    var dialog = new ResetLocalDataWindow(appDataPath);
+                    if (!await dialog.ShowDialog<bool>(chooser)) return;
+                    chooser.DisableJobOptions();
+                    try
+                    {
+                        _windowScope?.Dispose();
+                        _windowScope = null;
+                        _serviceProvider?.Dispose();
+                        _serviceProvider = null;
+                        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+                        LocalCaptureDataReset.Delete(appDataPath);
+                        desktop.Shutdown();
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        await ResetLocalDataWindow.ShowFailureAsync(chooser, exception.Message);
+                    }
+                };
+                void ShowRosterWorkspace(bool teamVolume)
+                {
+                    var window = new MainWindow(
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageReviewService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssociationExportService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterExportService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IJobMediaService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IOriginalPublicationService>(), teamVolume);
+                    window.ReturnRequested += ShowChooser;
+                    ReplaceWindow(window);
+                }
+                if (desktop.MainWindow is null) desktop.MainWindow = chooser;
+                else ReplaceWindow(chooser);
+            }
             desktop.Exit += (_, _) =>
             {
                 _windowScope?.Dispose();
@@ -54,3 +103,5 @@ public sealed partial class App : Avalonia.Application
         base.OnFrameworkInitializationCompleted();
     }
 }
+
+
