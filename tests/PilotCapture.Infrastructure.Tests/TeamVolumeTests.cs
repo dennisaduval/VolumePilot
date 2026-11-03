@@ -23,7 +23,8 @@ public sealed class TeamVolumeTests
         const string csv = "Name,Grade,School,Team,Role\r\n"
             + "\"Alex Jones, Jr.\",Senior,North High,Tigers,Player\r\n"
             + "\"Alex Jones, Jr.\",Junior,South High,Tigers,Player\r\n"
-            + ",,North High,Tigers,Head Coach\r\n";
+            + ",,North High,Tigers,Assistant Coach\r\n"
+            + ",,North High,Tigers,Assistant Coach\r\n";
         var bytes = Encoding.UTF8.GetBytes(csv);
         using var input = new MemoryStream(bytes);
         var document = RosterCsvReader.Read(input);
@@ -35,13 +36,23 @@ public sealed class TeamVolumeTests
         var rows = RosterImportPreviewBuilder.Build(document, mapping);
         var imported = await new RosterImportService(db).ImportAsync(new RosterImportCommand(
             "Basketball", "sample.csv", RosterImportService.ComputeSha256(bytes), rows, new HashSet<string>(), AllowDisplayNameOnly: true), token);
-        Assert.Equal(2, imported.RowsImported);
-        Assert.Equal(1, imported.RowsSkipped);
-        Assert.Equal(3, await db.RosterImportRows.CountAsync(token));
+        Assert.Equal(4, imported.RowsImported);
+        Assert.Equal(0, imported.RowsSkipped);
+        Assert.Equal(4, await db.RosterImportRows.CountAsync(token));
         var workflow = new CaptureWorkflowService(db);
         var teams = await workflow.GetGroupsAsync(imported.EventId, token);
         Assert.Equal(new[] { "Tigers / North High", "Tigers / South High" }, teams.Select(x => x.Name));
         var session = await workflow.StartSessionAsync(imported.EventId, "Photographer", CaptureWorkflowType.Portrait, token);
+        var coaches = await workflow.SearchSubjectsAsync(imported.EventId, "assistant coach", token);
+        Assert.Equal(2, coaches.Count);
+        Assert.All(coaches, coach => Assert.True(coach.IsUnidentified));
+        Assert.NotEqual(coaches[0].MembershipId, coaches[1].MembershipId);
+        var coachSet = await workflow.SelectSubjectAsync(session.Id, coaches[0].MembershipId, token);
+        await workflow.UpdatePlayerInformationAsync(session.Id, coaches[0].MembershipId,
+            new CapturePlayerInformation("Coach Morgan", new CaptureSubjectDetails(null, null, null, "Assistant Coach")), token);
+        var namedCoach = (await workflow.GetActiveSessionAsync(token))!.CurrentCaptureSet!;
+        Assert.Equal(coachSet.CaptureSetId, namedCoach.CaptureSetId);
+        Assert.False(namedCoach.IsUnidentified);
         var matches = await workflow.SearchSubjectsAsync(imported.EventId, "alex", token);
         Assert.Equal(2, matches.Count);
         Assert.All(matches, x => Assert.Equal("Alex Jones, Jr.", x.DisplayName));

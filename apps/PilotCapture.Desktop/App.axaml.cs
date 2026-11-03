@@ -48,12 +48,32 @@ public sealed partial class App : Avalonia.Application
                 var chooser = new JobChooserWindow();
                 chooser.JobSelected += type =>
                 {
-                    var fast = new FastCaptureWindow(type, _windowScope.ServiceProvider.GetRequiredService<FastCaptureController>());
+                    var fast = new FastCaptureWindow(type, _windowScope!.ServiceProvider.GetRequiredService<FastCaptureController>());
                     fast.ReturnRequested += ShowChooser;
                     ReplaceWindow(fast);
                 };
                 chooser.LegacySelected += () => ShowRosterWorkspace(false);
                 chooser.TeamVolumeSelected += () => ShowRosterWorkspace(true);
+                chooser.ResetLocalDataRequested += async () =>
+                {
+                    var dialog = new ResetLocalDataWindow(appDataPath);
+                    if (!await dialog.ShowDialog<bool>(chooser)) return;
+                    chooser.DisableJobOptions();
+                    try
+                    {
+                        _windowScope?.Dispose();
+                        _windowScope = null;
+                        _serviceProvider?.Dispose();
+                        _serviceProvider = null;
+                        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+                        LocalCaptureDataReset.Delete(appDataPath);
+                        desktop.Shutdown();
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        await ResetLocalDataWindow.ShowFailureAsync(chooser, exception.Message);
+                    }
+                };
                 void ShowRosterWorkspace(bool teamVolume)
                 {
                     var window = new MainWindow(

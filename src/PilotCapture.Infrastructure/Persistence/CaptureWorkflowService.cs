@@ -104,6 +104,9 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             ?? throw new InvalidOperationException("The player is unavailable in this session.");
         var subject = membership.Subject!;
         var memberships = await dbContext.Memberships.Where(x => x.SubjectId == subject.Id).ToListAsync(cancellationToken);
+        if (subject.IdentityStatus == SubjectIdentityStatus.Unidentified &&
+            (!string.Equals(subject.DisplayName, name, StringComparison.Ordinal) || first is not null || last is not null))
+            subject.IdentityStatus = SubjectIdentityStatus.Known;
         subject.DisplayName = name;
         subject.FirstName = first;
         subject.LastName = last;
@@ -114,7 +117,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             var fields = item.SpaDataJson is { } json
                 ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json)!
                 : PilotCapture.Application.Rosters.SpaRosterFields.ReadSource(item.SourceDataJson);
-            fields["NAME"] = name;
+            fields["NAME"] = subject.IdentityStatus == SubjectIdentityStatus.Unidentified ? "" : name;
             fields["FIRSTNAME"] = first ?? "";
             fields["LASTNAME"] = last ?? "";
             if (item.Id == membership.Id) fields["NUMBER"] = number ?? "";

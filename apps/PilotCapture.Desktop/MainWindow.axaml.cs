@@ -33,6 +33,8 @@ public sealed partial class MainWindow : Window
     private readonly IOriginalPublicationService _originalPublication;
     private readonly HashSet<string> _pendingMasterJobs = new(StringComparer.Ordinal);
     private bool _isPublishingOriginals;
+    private Task _publicationTask = Task.CompletedTask;
+    private readonly Dictionary<string, DateTime> _watchBaseline = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<CaptureGroupChoice> _allGroups = [];
     private int _searchVersion;
     private int _previewVersion;
@@ -119,7 +121,7 @@ public sealed partial class MainWindow : Window
         ChooseJobTypeButton.IsEnabled = false;
         StopImageMonitoring();
         await _captureOperationLock.WaitAsync();
-        try { ReturnRequested?.Invoke(); }
+        try { await _publicationTask; ReturnRequested?.Invoke(); }
         finally { _captureOperationLock.Release(); }
     }
 
@@ -237,11 +239,16 @@ public sealed partial class MainWindow : Window
 
     private async void OnImportRosterClick(object? sender, RoutedEventArgs e)
     {
-        if (_rosterDocument is null || _rosterFileName is null || _rosterSha256 is null)
-            return;
-
+        await _captureOperationLock.WaitAsync();
         try
         {
+            if (_rosterDocument is null || _rosterFileName is null || _rosterSha256 is null || _hasImportedCurrentFile)
+                return;
+            if (_teamVolume && _activeCaptureSession is not null)
+            {
+                RosterWarnings.Text = "End the active session in Session & files before importing a new job.";
+                return;
+            }
             var mapping = new RosterColumnMapping(
                 SelectedColumn(FirstNameColumn),
                 SelectedColumn(LastNameColumn),
@@ -265,7 +272,7 @@ public sealed partial class MainWindow : Window
             RosterSummary.Text = $"Imported {result.RowsImported} of {result.RowsRead} roster rows into '{EventName.Text?.Trim()}'.";
             RosterWarnings.Text = result.RowsSkipped == 0
                 ? "The event and roster are saved on this computer."
-                : $"The event and roster are saved on this computer. {result.RowsSkipped} row(s) were preserved in the import record but skipped because a name or group was blank.";
+                : $"The event and roster are saved on this computer. {result.RowsSkipped} row(s) were preserved in the import record but could not be added to a roster. Check for a missing team, name or role.";
             _hasImportedCurrentFile = true;
             ImportRosterButton.IsEnabled = false;
             await LoadCaptureSetupAsync(result.EventId);
@@ -275,6 +282,7 @@ public sealed partial class MainWindow : Window
         {
             RosterWarnings.Text = $"Roster import failed: {exception.Message}";
         }
+        finally { _captureOperationLock.Release(); }
     }
 
     private void PopulateMatchReview(IReadOnlyList<RosterPreviewRow> rows)
@@ -486,6 +494,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var path = folders[0].Path.LocalPath;
+            if (_teamVolume) StopImageMonitoring();
             await _captureWorkflowService.SetSmartShooterOutputPathAsync(path);
             SmartShooterFolderPath.Text = path;
             _observedSourceVersions.Clear();
@@ -516,11 +525,27 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (_teamVolume)
+        {
+            try
+            {
+                _watchBaseline.Clear();
+                foreach (var file in Directory.EnumerateFiles(path))
+                    _watchBaseline[Path.GetFullPath(file)] = File.GetCreationTimeUtc(file);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                ImageIngestStatus.Text = $"Could not read the Smart Shooter folder: {exception.Message}";
+                return;
+            }
+        }
         _isMonitoringImageFolder = true;
         _imageScanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _imageScanTimer.Tick += OnImageScanTick;
         _imageScanTimer.Start();
-        ImageIngestStatus.Text = $"Monitoring {path} for JPEGs newer than the current subject selection. Original files are not changed or deleted.";
+        ImageIngestStatus.Text = _teamVolume
+            ? $"Monitoring {path}. Files already in the folder were skipped. Start shooting now."
+            : $"Monitoring {path} for JPEGs newer than the current subject selection. Original files are not changed or deleted.";
         UpdateCaptureControls();
         _ = ScanSmartShooterFolderAsync();
     }
@@ -550,10 +575,12 @@ public sealed partial class MainWindow : Window
                 .ToArray();
             foreach (var path in files)
             {
-                if (_activeCaptureSession?.CurrentCaptureSet?.CaptureSetId != captureSet.CaptureSetId)
+                if (!_isMonitoringImageFolder || _activeCaptureSession?.CurrentCaptureSet?.CaptureSetId != captureSet.CaptureSetId)
                     break;
 
                 var fullPath = Path.GetFullPath(path);
+                if (_teamVolume && _watchBaseline.TryGetValue(fullPath, out var created) &&
+                    created == File.GetCreationTimeUtc(fullPath)) continue;
                 var sourceVersion = GetSourceVersionKey(fullPath);
                 if (_observedSourceVersions.Contains(sourceVersion))
                     continue;
@@ -1393,10 +1420,15 @@ public sealed partial class MainWindow : Window
         QueueMasterPublication(job.Id);
     }
 
-    private async void QueueMasterPublication(string eventId)
+    private void QueueMasterPublication(string eventId)
     {
         _pendingMasterJobs.Add(eventId);
         if (_isPublishingOriginals) return;
+        _publicationTask = PublishPendingOriginalsAsync();
+    }
+
+    private async Task PublishPendingOriginalsAsync()
+    {
         _isPublishingOriginals = true;
         try
         {
