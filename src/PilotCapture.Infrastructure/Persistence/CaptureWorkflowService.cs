@@ -64,6 +64,29 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         }).ToArray();
     }
 
+    public async Task<string> AddTeamAsync(string sessionId, string name, string? context, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var label = string.IsNullOrWhiteSpace(context) ? name.Trim() : $"{name.Trim()} / {context.Trim()}";
+        if (label.Length > 200) throw new ArgumentException("The team and its context can be at most 200 characters.");
+        var session = await dbContext.CaptureSessions.SingleOrDefaultAsync(x => x.Id == sessionId && x.EndedAtUtc == null, cancellationToken)
+            ?? throw new InvalidOperationException("Start a session before adding a team.");
+        var teams = await dbContext.Groups.Where(x => x.EventId == session.EventId && x.IsActive).ToListAsync(cancellationToken);
+        if (teams.Any(x => x.Name.Equals(label, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("That team is already listed. Enter a different school or division for another team with the same name.");
+        var team = new Group { EventId = session.EventId, Name = label, CreatedAtUtc = DateTimeOffset.UtcNow, IsActive = true };
+        dbContext.Groups.Add(team);
+        await CompleteCurrentCaptureSetAsync(session.Id, DateTimeOffset.UtcNow, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return team.Id;
+    }
+
+    public async Task CompleteSubjectAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        await CompleteCurrentCaptureSetAsync(sessionId, DateTimeOffset.UtcNow, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<CaptureSubjectChoice>> GetSubjectsAsync(string groupId, CancellationToken cancellationToken = default) =>
         await dbContext.Memberships.AsNoTracking()
             .Where(membership => membership.GroupId == groupId && membership.IsActive && membership.Subject!.IsActive)

@@ -14,11 +14,12 @@
         <Border Width="1" Height="34" Background="#64748B" />
         <StackPanel Spacing="2" VerticalAlignment="Center">
           <TextBlock Text="PILOT CAPTURE" FontSize="14" FontWeight="Bold" Foreground="White" />
-          <TextBlock Text="0.1 · FIRST FLIGHT" FontSize="12" Foreground="#D7E3F2" />
+          <TextBlock x:Name="WorkspaceLabel" Text="0.1 · FIRST FLIGHT" FontSize="12" Foreground="#D7E3F2" />
         </StackPanel>
       </StackPanel>
     </Border>
 
+    <Button x:Name="ChooseJobTypeButton" Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,24,0" Content="Choose another job type" IsVisible="False" Click="OnChooseJobTypeClick" />
     <TabControl x:Name="MainTabs" Grid.Row="1" Margin="20">
       <TabItem Header="Roster">
       <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="14">
@@ -37,7 +38,7 @@
       <Border Grid.Row="1" Padding="16" CornerRadius="8" BorderBrush="#DCE3ED" Background="White" BorderThickness="1">
         <StackPanel Spacing="12">
           <TextBlock Text="Column mapping" FontSize="18" FontWeight="SemiBold" />
-          <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="14" RowSpacing="10">
+          <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="14" RowSpacing="10">
             <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
               <TextBlock Text="First name" />
               <ComboBox x:Name="FirstNameColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
@@ -51,7 +52,7 @@
               <ComboBox x:Name="TeamOrSchoolColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
             </StackPanel>
             <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
-              <TextBlock Text="Sport / group" />
+              <TextBlock x:Name="RosterContextLabel" Text="Sport / group" />
               <ComboBox x:Name="SportOrGroupColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
             </StackPanel>
             <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
@@ -61,6 +62,10 @@
             <StackPanel Grid.Row="1" Grid.Column="2" Spacing="4">
               <TextBlock Text="Class / category (preserved)" />
               <ComboBox x:Name="ClassOrCategoryColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
+            </StackPanel>
+            <StackPanel x:Name="FullNameMapping" Grid.Row="2" Spacing="4" IsVisible="False">
+              <TextBlock Text="Full name" />
+              <ComboBox x:Name="FullNameColumn" IsEnabled="False" SelectionChanged="OnColumnMappingChanged" />
             </StackPanel>
           </Grid>
         </StackPanel>
@@ -94,7 +99,7 @@
       </Grid>
       </TabItem>
 
-      <TabItem Header="Session &amp; files">
+      <TabItem x:Name="SessionTab" Header="Session &amp; files">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Spacing="16" Margin="12">
           <TextBlock Text="Team and Individual Photoday" FontSize="26" FontWeight="SemiBold" />
@@ -157,16 +162,27 @@
             </Border>
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
               <StackPanel Spacing="8">
-                <TextBlock Text="League / division" FontWeight="SemiBold" />
-                <ComboBox x:Name="LeagueCombo" SelectionChanged="OnLeagueChanged" />
+                <StackPanel x:Name="LeagueFilterPanel" Spacing="4">
+                  <TextBlock Text="League / division" FontWeight="SemiBold" />
+                  <ComboBox x:Name="LeagueCombo" SelectionChanged="OnLeagueChanged" />
+                </StackPanel>
                 <TextBox x:Name="TeamSearchBox" PlaceholderText="Search teams…" TextChanged="OnTeamSearchChanged" />
-                <ComboBox x:Name="CaptureGroupCombo" SelectionChanged="OnCaptureGroupChanged" FontSize="20" />
+                <ListBox x:Name="TeamSearchResults" IsVisible="False" MaxHeight="150" SelectionChanged="OnTeamResultSelected" />
+                <ComboBox x:Name="CaptureGroupCombo" PlaceholderText="Select team" SelectionChanged="OnCaptureGroupChanged" FontSize="20" />
                 <TextBox x:Name="SubjectSearchBox" PlaceholderText="Search this job by name, number or team…" TextChanged="OnSubjectSearchChanged" />
                 <ListBox x:Name="SubjectSearchResults" IsVisible="False" MaxHeight="180" SelectionChanged="OnSearchResultSelected" />
+                <ListBox x:Name="TeamAthleteList" IsVisible="False" MinHeight="112" MaxHeight="240" SelectionChanged="OnTeamAthleteSelected" />
                 <ComboBox x:Name="CaptureSubjectCombo" FontSize="20" SelectionChanged="OnAthleteSelectionChanged" />
                 <Button Classes="primary-action" x:Name="SelectSubjectButton" Content="Select athlete" IsEnabled="False" Click="OnSelectSubjectClick" />
                 <TextBlock x:Name="SelectedCaptureSubject" Text="No subject selected." TextWrapping="Wrap" FontSize="18" />
                 <Button Classes="forward-action" x:Name="NextSubjectButton" Content="Complete subject · next unphotographed" MinHeight="64" FontSize="20" IsEnabled="False" Click="OnNextSubjectClick" />
+                <Expander x:Name="AddTeamPanel" Header="Add team" IsVisible="False">
+                  <StackPanel Spacing="8">
+                    <TextBox x:Name="NewTeamName" PlaceholderText="Team name" />
+                    <TextBox x:Name="NewTeamContext" PlaceholderText="School or division (optional)" />
+                    <Button x:Name="AddTeamButton" Content="Add and select team" MinHeight="44" Click="OnAddTeamClick" />
+                  </StackPanel>
+                </Expander>
                 <Expander Header="Add new / unrostered subject">
                   <StackPanel Spacing="8">
                     <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">

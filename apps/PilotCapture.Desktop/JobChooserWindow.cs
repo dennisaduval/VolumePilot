@@ -9,6 +9,7 @@ public sealed class JobChooserWindow : Window
 {
     public event Action<CaptureJobType>? JobSelected;
     public event Action? LegacySelected;
+    public event Action? TeamVolumeSelected;
     public JobChooserWindow()
     {
         Title = "VolumePilot | Pilot Capture"; Width = 780; Height = 720; MinWidth = 640; MinHeight = 640;
@@ -20,7 +21,9 @@ public sealed class JobChooserWindow : Window
         Add("Print on site · Team and Individuals", CaptureJobType.PrintOnSiteTeamAndIndividual, true);
         Add("Action", CaptureJobType.ActionPhotography, true);
         Add("Leagues and Schools · coming later", CaptureJobType.TeamAndIndividual, false);
-        Add("Individual Teams · coming later", CaptureJobType.IndividualTeams, false);
+        var teamVolume = new Button { Content = "Team Volume", MinHeight = 68, FontSize = 20, HorizontalAlignment = HorizontalAlignment.Stretch };
+        teamVolume.Click += (_, _) => TeamVolumeSelected?.Invoke();
+        panel.Children.Add(teamVolume);
         var legacy = new Button { Content = "Open previous roster workspace", HorizontalAlignment = HorizontalAlignment.Left };
         legacy.Click += (_, _) => LegacySelected?.Invoke(); panel.Children.Add(legacy);
         Content = new ScrollViewer { Content = panel };

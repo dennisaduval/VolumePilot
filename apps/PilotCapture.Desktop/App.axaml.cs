@@ -52,21 +52,24 @@ public sealed partial class App : Avalonia.Application
                     fast.ReturnRequested += ShowChooser;
                     ReplaceWindow(fast);
                 };
-                chooser.LegacySelected += () =>
+                chooser.LegacySelected += () => ShowRosterWorkspace(false);
+                chooser.TeamVolumeSelected += () => ShowRosterWorkspace(true);
+                void ShowRosterWorkspace(bool teamVolume)
                 {
-                var window = new MainWindow(
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageReviewService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssociationExportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterExportService>(),
-                _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IJobMediaService>(),
-                _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IOriginalPublicationService>());
+                    var window = new MainWindow(
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterImportService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Capture.ICaptureWorkflowService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageIngestService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageReviewService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssetStore>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IImageAssociationExportService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.Rosters.IRosterExportService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<WindowsPortraitFaceDetector>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IJobMediaService>(),
+                        _windowScope.ServiceProvider.GetRequiredService<PilotCapture.Application.IOriginalPublicationService>(), teamVolume);
+                    window.ReturnRequested += ShowChooser;
                     ReplaceWindow(window);
-                };
+                }
                 if (desktop.MainWindow is null) desktop.MainWindow = chooser;
                 else ReplaceWindow(chooser);
             }

@@ -18,6 +18,7 @@ public static class SpaRosterFields
             var header = cell.GetProperty("Header").GetString() ?? "";
             var key = string.Concat(header.Where(char.IsLetterOrDigit)).ToUpperInvariant();
             key = key switch { "CLASSNAME" => "CLASS", "ROSTERNUMBER" or "JERSEYNUMBER" => "NUMBER", _ => key };
+            key = key switch { "SCHOOL" => "SCHOOLNAME", "GRADE" => "CLASS", _ => key };
             if (Columns.Contains(key)) fields.TryAdd(key, cell.GetProperty("Value").GetString() ?? "");
         }
         return fields;

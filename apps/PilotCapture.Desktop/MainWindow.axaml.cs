@@ -14,6 +14,8 @@ namespace PilotCapture.Desktop;
 
 public sealed partial class MainWindow : Window
 {
+    private readonly bool _teamVolume;
+    public event Action? ReturnRequested;
     private RosterCsvDocument? _rosterDocument;
     private string? _rosterFileName;
     private string? _rosterSha256;
@@ -57,8 +59,10 @@ public sealed partial class MainWindow : Window
         IRosterExportService rosterExportService,
         WindowsPortraitFaceDetector faceDetector,
         IJobMediaService jobMediaService,
-        IOriginalPublicationService originalPublication)
+        IOriginalPublicationService originalPublication,
+        bool teamVolume = false)
     {
+        _teamVolume = teamVolume;
         _rosterImportService = rosterImportService;
         _captureWorkflowService = captureWorkflowService;
         _imageIngestService = imageIngestService;
@@ -72,6 +76,16 @@ public sealed partial class MainWindow : Window
         // The generated initializer loads XAML and assigns every named control field.
         // Loading XAML directly leaves those fields null before the event hookups.
         InitializeComponent();
+        if (_teamVolume)
+        {
+            Title = "VolumePilot | Team Volume";
+            ChooseJobTypeButton.IsVisible = true;
+            WorkspaceLabel.Text = "TEAM VOLUME";
+            FullNameMapping.IsVisible = TeamAthleteList.IsVisible = AddTeamPanel.IsVisible = true;
+            LeagueFilterPanel.IsVisible = CaptureSubjectCombo.IsVisible = SelectSubjectButton.IsVisible = false;
+            RosterContextLabel.Text = "Division / school / sport (optional)";
+            TeamSearchBox.PlaceholderText = "Search all teams…";
+        }
         EventName.TextChanged += (_, _) => UpdateImportAvailability();
         PhotographerName.TextChanged += (_, _) => UpdateCaptureControls();
         UnidentifiedSubjectName.TextChanged += (_, _) => UpdateCaptureControls();
@@ -80,7 +94,7 @@ public sealed partial class MainWindow : Window
         ManualRosterNumber.TextChanged += (_, _) => UpdateCaptureControls();
         ManualRole.TextChanged += (_, _) => UpdateCaptureControls();
         WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Portrait", Tag = CaptureWorkflowType.Portrait });
-        WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Action", Tag = CaptureWorkflowType.Action });
+        if (!_teamVolume) WorkflowTypeCombo.Items.Add(new ComboBoxItem { Content = "Action", Tag = CaptureWorkflowType.Action });
         WorkflowTypeCombo.SelectedIndex = 0;
         ExportKindCombo.ItemsSource = new[] { "Original JPEGs · team folders", "Edited PNGs · team folders", "Batch editing · original photos" };
         ExportKindCombo.SelectedIndex = 0;
@@ -94,6 +108,15 @@ public sealed partial class MainWindow : Window
             foreach (var row in _captureImageRows)
                 row.Thumbnail.Dispose();
         };
+    }
+
+    private async void OnChooseJobTypeClick(object? sender, RoutedEventArgs e)
+    {
+        ChooseJobTypeButton.IsEnabled = false;
+        StopImageMonitoring();
+        await _captureOperationLock.WaitAsync();
+        try { ReturnRequested?.Invoke(); }
+        finally { _captureOperationLock.Release(); }
     }
 
     private async void OnOpenRosterClick(object? sender, RoutedEventArgs e)
@@ -126,13 +149,17 @@ public sealed partial class MainWindow : Window
             _isPopulatingMappings = true;
             SetOptions(FirstNameColumn, _rosterDocument.Headers, suggestions.FirstNameColumn);
             SetOptions(LastNameColumn, _rosterDocument.Headers, suggestions.LastNameColumn);
-            SetOptions(TeamOrSchoolColumn, _rosterDocument.Headers, suggestions.TeamOrSchoolColumn);
-            SetOptions(SportOrGroupColumn, _rosterDocument.Headers, suggestions.SportOrGroupColumn);
+            var teamColumn = _teamVolume ? RosterColumnSuggestionBuilder.FindTeam(_rosterDocument.Headers) : null;
+            SetOptions(FullNameColumn, _rosterDocument.Headers, _teamVolume ? RosterColumnSuggestionBuilder.FindFullName(_rosterDocument.Headers) : null);
+            SetOptions(TeamOrSchoolColumn, _rosterDocument.Headers, teamColumn ?? suggestions.TeamOrSchoolColumn);
+            var contextColumn = _teamVolume ? RosterColumnSuggestionBuilder.FindTeamContext(_rosterDocument.Headers) : null;
+            SetOptions(SportOrGroupColumn, _rosterDocument.Headers,
+                contextColumn != (teamColumn ?? suggestions.TeamOrSchoolColumn) ? contextColumn ?? suggestions.SportOrGroupColumn : suggestions.SportOrGroupColumn);
             SetOptions(RosterNumberColumn, _rosterDocument.Headers, suggestions.RosterNumberColumn);
             SetOptions(ClassOrCategoryColumn, _rosterDocument.Headers, suggestions.ClassOrCategoryColumn);
             _isPopulatingMappings = false;
 
-            UpdatePreview(suggestions.Warnings);
+            UpdatePreview(_teamVolume ? [] : suggestions.Warnings);
         }
         catch (RosterCsvFormatException exception)
         {
@@ -173,7 +200,7 @@ public sealed partial class MainWindow : Window
             SelectedColumn(TeamOrSchoolColumn),
             SelectedColumn(SportOrGroupColumn),
             SelectedColumn(RosterNumberColumn),
-            SelectedColumn(ClassOrCategoryColumn));
+            SelectedColumn(ClassOrCategoryColumn), SelectedColumn(FullNameColumn), _teamVolume);
         var rows = RosterImportPreviewBuilder.Build(_rosterDocument, mapping);
         PopulateMatchReview(rows);
         var warnings = initialWarnings.ToList();
@@ -184,8 +211,8 @@ public sealed partial class MainWindow : Window
             warnings.Add($"{mismatchedRows} row(s) have a different number of cells than the header. Their original cells are preserved.");
         if (possibleMatchRows > 0)
             warnings.Add($"{possibleMatchRows} row(s) share a name across groups. These are review suggestions only; no people are merged.");
-        if (mapping.FirstNameColumn is null || mapping.LastNameColumn is null)
-            warnings.Add("Map both name columns to preview subject names.");
+        if (mapping.FullNameColumn is null && (mapping.FirstNameColumn is null || mapping.LastNameColumn is null))
+            warnings.Add("Map Full name or both First name and Last name.");
         if (mapping.TeamOrSchoolColumn is null && mapping.SportOrGroupColumn is null)
             warnings.Add("Map a team, school, sport, or group column to preview memberships.");
 
@@ -217,7 +244,7 @@ public sealed partial class MainWindow : Window
                 SelectedColumn(TeamOrSchoolColumn),
                 SelectedColumn(SportOrGroupColumn),
                 SelectedColumn(RosterNumberColumn),
-                SelectedColumn(ClassOrCategoryColumn));
+                SelectedColumn(ClassOrCategoryColumn), SelectedColumn(FullNameColumn), _teamVolume);
             var rows = RosterImportPreviewBuilder.Build(_rosterDocument, mapping);
             var confirmed = MatchReviewPanel.Children
                 .OfType<CheckBox>()
@@ -229,7 +256,7 @@ public sealed partial class MainWindow : Window
                 _rosterFileName,
                 _rosterSha256,
                 rows,
-                confirmed));
+                confirmed, _teamVolume));
 
             RosterSummary.Text = $"Imported {result.RowsImported} of {result.RowsRead} roster rows into '{EventName.Text?.Trim()}'.";
             RosterWarnings.Text = result.RowsSkipped == 0
@@ -237,7 +264,8 @@ public sealed partial class MainWindow : Window
                 : $"The event and roster are saved on this computer. {result.RowsSkipped} row(s) were preserved in the import record but skipped because a name or group was blank.";
             _hasImportedCurrentFile = true;
             ImportRosterButton.IsEnabled = false;
-            await LoadCaptureSetupAsync();
+            await LoadCaptureSetupAsync(result.EventId);
+            if (_teamVolume) MainTabs.SelectedItem = SessionTab;
         }
         catch (Exception exception)
         {
@@ -270,7 +298,8 @@ public sealed partial class MainWindow : Window
 
     private void UpdateImportAvailability()
     {
-        var namesMapped = SelectedColumn(FirstNameColumn) is not null && SelectedColumn(LastNameColumn) is not null;
+        var namesMapped = SelectedColumn(FullNameColumn) is not null
+            || (SelectedColumn(FirstNameColumn) is not null && SelectedColumn(LastNameColumn) is not null);
         var groupMapped = SelectedColumn(TeamOrSchoolColumn) is not null || SelectedColumn(SportOrGroupColumn) is not null;
         ImportRosterButton.IsEnabled = _rosterDocument is { Rows.Count: > 0 }
             && !_hasImportedCurrentFile
@@ -292,7 +321,7 @@ public sealed partial class MainWindow : Window
     private static int? SelectedColumn(ComboBox comboBox) =>
         (comboBox.SelectedItem as ComboBoxItem)?.Tag as int?;
 
-    private async Task LoadCaptureSetupAsync()
+    private async Task LoadCaptureSetupAsync(string? eventId = null)
     {
         try
         {
@@ -302,7 +331,7 @@ public sealed partial class MainWindow : Window
             MasterFolderPath.Text = await _jobMediaService.GetMasterPathAsync() ?? string.Empty;
             SmartShooterFolderPath.Text = await _captureWorkflowService.GetSmartShooterOutputPathAsync() ?? string.Empty;
             _isPopulatingCaptureChoices = true;
-            SetChoices(CaptureEventCombo, events, item => item.Name, _activeCaptureSession?.EventId);
+            SetChoices(CaptureEventCombo, events, item => item.Name, _activeCaptureSession?.EventId ?? eventId);
             StationCodeCombo.SelectedItem = StationCodeCombo.Items
                 .OfType<ComboBoxItem>()
                 .FirstOrDefault(item => string.Equals(item.Tag as string, stationCode, StringComparison.Ordinal));
@@ -312,7 +341,7 @@ public sealed partial class MainWindow : Window
             {
                 PhotographerName.Text = _activeCaptureSession.PhotographerName;
                 var workflowName = _activeCaptureSession.ProfileName;
-                WorkflowTypeCombo.SelectedIndex = workflowName.Equals("Action", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                WorkflowTypeCombo.SelectedIndex = !_teamVolume && workflowName.Equals("Action", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
                 if (_activeCaptureSession.CurrentCaptureSet is { } currentSet)
                     SelectedCaptureSubject.Text = $"Resumed with {currentSet.SubjectName} selected. Ready for this subject's images.";
             }
@@ -409,7 +438,18 @@ public sealed partial class MainWindow : Window
     {
         if (_isPopulatingCaptureChoices) return;
         await _captureOperationLock.WaitAsync();
-        try { await RefreshCaptureSubjectsAsync(); }
+        try
+        {
+            if (_teamVolume && _activeCaptureSession is { CurrentCaptureSet: { } current } session
+                && current.GroupId != SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo)?.Id)
+            {
+                await _captureWorkflowService.CompleteSubjectAsync(session.Id);
+                _activeCaptureSession = session with { CurrentCaptureSet = null };
+                SelectedCaptureSubject.Text = "Select an athlete before shooting.";
+                await RefreshReviewImagesAsync();
+            }
+            await RefreshCaptureSubjectsAsync();
+        }
         catch (Exception exception) { ReviewStatus.Text = $"Athletes could not load: {exception.Message}"; }
         finally { _captureOperationLock.Release(); }
     }
@@ -849,8 +889,9 @@ public sealed partial class MainWindow : Window
         var league = LeagueCombo.SelectedItem as string;
         LeagueCombo.ItemsSource = new[] { "All leagues / divisions" }.Concat(groups.Select(x => x.LeagueName).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)).ToArray();
         LeagueCombo.SelectedItem = league is not null && LeagueCombo.Items.Contains(league) ? league : "All leagues / divisions";
-        SetChoices(CaptureGroupCombo, FilterGroups(), item => item.Name,
-            selectedGroupId ?? _activeCaptureSession?.CurrentCaptureSet?.GroupId);
+        SetChoices(CaptureGroupCombo, _teamVolume ? groups : FilterGroups(), TeamLabel,
+            selectedGroupId ?? _activeCaptureSession?.CurrentCaptureSet?.GroupId
+                ?? SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo)?.Id);
         _isPopulatingCaptureChoices = false;
         await RefreshCaptureSubjectsAsync();
     }
@@ -865,6 +906,13 @@ public sealed partial class MainWindow : Window
         _isPopulatingCaptureChoices = true;
         SetChoices(CaptureSubjectCombo, subjects, item => FormatSubject(item),
             _activeCaptureSession?.CurrentCaptureSet?.MembershipId);
+        if (_teamVolume)
+        {
+            var membershipId = _activeCaptureSession?.CurrentCaptureSet?.MembershipId;
+            var rows = subjects.Select(x => new ListBoxItem { Content = FormatSubject(x), Tag = x, MinHeight = 44 }).ToArray();
+            TeamAthleteList.ItemsSource = rows;
+            TeamAthleteList.SelectedItem = rows.FirstOrDefault(x => ((CaptureSubjectChoice)x.Tag!).MembershipId == membershipId);
+        }
         _isPopulatingCaptureChoices = false;
         UpdateCaptureControls();
     }
@@ -884,6 +932,7 @@ public sealed partial class MainWindow : Window
                 workflowType);
             UpdateCaptureControls();
             await RefreshReviewImagesAsync();
+            if (_teamVolume) MainTabs.SelectedItem = ImageReviewTab;
         }
         catch (Exception exception)
         {
@@ -940,7 +989,10 @@ public sealed partial class MainWindow : Window
             LeagueCombo.SelectedIndex = 0;
             TeamSearchBox.Text = "";
             _isPopulatingCaptureChoices = false;
-            await RefreshCaptureGroupsAsync(captureSet.GroupId);
+            if (_teamVolume && SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo)?.Id == captureSet.GroupId)
+                await RefreshCaptureSubjectsAsync();
+            else
+                await RefreshCaptureGroupsAsync(captureSet.GroupId);
             UpdateCaptureControls();
             await RefreshReviewImagesAsync();
             MainTabs.SelectedItem = ImageReviewTab;
@@ -1041,16 +1093,19 @@ public sealed partial class MainWindow : Window
         EndSessionButton.IsEnabled = active;
         CaptureEventCombo.IsEnabled = !active;
         PhotographerName.IsEnabled = !active;
-        WorkflowTypeCombo.IsEnabled = !active;
+        WorkflowTypeCombo.IsEnabled = !active && !_teamVolume;
         StationCodeCombo.IsEnabled = !active;
         MonitorFolderButton.IsEnabled = _isMonitoringImageFolder
             || (active && _activeCaptureSession?.CurrentCaptureSet is not null
                 && !string.IsNullOrWhiteSpace(SmartShooterFolderPath.Text));
         MonitorFolderButton.Content = _isMonitoringImageFolder ? "Stop monitoring" : "Start monitoring";
         SelectSubjectButton.IsEnabled = active && SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not null;
-        CreateManualSubjectButton.IsEnabled = active
+        AddTeamButton.IsEnabled = active;
+        TeamAthleteList.IsEnabled = active;
+        var canAddSubject = active && (!_teamVolume || SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo) is not null);
+        CreateManualSubjectButton.IsEnabled = canAddSubject
             && (!string.IsNullOrWhiteSpace(ManualFirstName.Text) || !string.IsNullOrWhiteSpace(ManualLastName.Text));
-        CreateUnidentifiedButton.IsEnabled = active && !string.IsNullOrWhiteSpace(UnidentifiedSubjectName.Text);
+        CreateUnidentifiedButton.IsEnabled = canAddSubject && !string.IsNullOrWhiteSpace(UnidentifiedSubjectName.Text);
         CaptureGroupCombo.IsEnabled = CaptureGroupCombo.Items.Count > 0;
         CaptureSubjectCombo.IsEnabled = CaptureSubjectCombo.Items.Count > 0;
         SessionStatus.Text = _activeCaptureSession is { } activeSession
@@ -1091,12 +1146,56 @@ public sealed partial class MainWindow : Window
         return subject.HasPhotos ? $"{name} · ✓ photographed" : name;
     }
 
+    private string TeamLabel(CaptureGroupChoice team) =>
+        _teamVolume && !string.IsNullOrWhiteSpace(team.LeagueName) ? $"{team.Name} · {team.LeagueName}" : team.Name;
+
+    private void OnTeamResultSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (TeamSearchResults.SelectedItem is not ListBoxItem { Tag: CaptureGroupChoice team }) return;
+        TeamSearchBox.Text = "";
+        CaptureGroupCombo.SelectedItem = CaptureGroupCombo.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(x => x.Tag is CaptureGroupChoice choice && choice.Id == team.Id);
+    }
+
+    private async void OnTeamAthleteSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_isPopulatingCaptureChoices && TeamAthleteList.SelectedItem is ListBoxItem { Tag: CaptureSubjectChoice subject })
+            await SelectCaptureSubjectAsync(subject);
+    }
+
+    private async void OnAddTeamClick(object? sender, RoutedEventArgs e)
+    {
+        await _captureOperationLock.WaitAsync();
+        try
+        {
+            if (_activeCaptureSession is not { } session) return;
+            var id = await _captureWorkflowService.AddTeamAsync(session.Id, NewTeamName.Text ?? "", NewTeamContext.Text);
+            _activeCaptureSession = session with { CurrentCaptureSet = null };
+            NewTeamName.Text = NewTeamContext.Text = TeamSearchBox.Text = "";
+            SelectedCaptureSubject.Text = "Team added. Add an athlete before shooting.";
+            await RefreshCaptureGroupsAsync(id);
+            await RefreshReviewImagesAsync();
+        }
+        catch (Exception exception) { SelectedCaptureSubject.Text = $"Team could not be added: {exception.Message}"; }
+        finally { _captureOperationLock.Release(); }
+    }
+
     private IEnumerable<CaptureGroupChoice> FilterGroups() => _allGroups.Where(x =>
         (LeagueCombo.SelectedIndex <= 0 || x.LeagueName == LeagueCombo.SelectedItem as string)
         && x.Name.Contains(TeamSearchBox.Text ?? "", StringComparison.OrdinalIgnoreCase));
 
     private async void OnTeamSearchChanged(object? sender, TextChangedEventArgs e)
     {
+        if (_teamVolume)
+        {
+            var query = TeamSearchBox.Text?.Trim() ?? "";
+            TeamSearchResults.ItemsSource = query.Length == 0 ? Array.Empty<ListBoxItem>() : _allGroups
+                .Where(x => TeamLabel(x).Contains(query, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(TeamLabel, StringComparer.CurrentCultureIgnoreCase)
+                .Select(x => new ListBoxItem { Content = TeamLabel(x), Tag = x, MinHeight = 44 }).ToArray();
+            TeamSearchResults.IsVisible = query.Length > 0 && TeamSearchResults.Items.Count > 0;
+            return;
+        }
         if (_isPopulatingCaptureChoices) return;
         await _captureOperationLock.WaitAsync();
         try
@@ -1126,7 +1225,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var matches = await _captureWorkflowService.SearchSubjectsAsync(job.Id, query);
-            if (version != _searchVersion) return;
+            if (version != _searchVersion || SelectedChoice<CaptureEventChoice>(CaptureEventCombo)?.Id != job.Id) return;
             SubjectSearchResults.ItemsSource = matches.Select(x => new ListBoxItem { Content = FormatSubject(x) + " · " + x.GroupName, Tag = x, MinHeight = 48 }).ToArray();
             SubjectSearchResults.IsVisible = true;
         }

@@ -41,9 +41,10 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
         {
             Membership? membership = null;
             var groupName = row.GroupName?.Trim();
-            if (string.IsNullOrWhiteSpace(row.FirstName)
-                || string.IsNullOrWhiteSpace(row.LastName)
-                || string.IsNullOrWhiteSpace(groupName))
+            var hasName = command.AllowDisplayNameOnly
+                ? !string.IsNullOrWhiteSpace(row.DisplayName)
+                : !string.IsNullOrWhiteSpace(row.FirstName) && !string.IsNullOrWhiteSpace(row.LastName);
+            if (!hasName || string.IsNullOrWhiteSpace(groupName))
             {
                 skipped++;
             }
@@ -66,14 +67,14 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
                     : "row:" + row.SourceRecordNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 if (!subjects.TryGetValue(subjectKey, out var subject))
                 {
-                    var firstName = row.FirstName.Trim();
-                    var lastName = row.LastName.Trim();
+                    var firstName = row.FirstName?.Trim();
+                    var lastName = row.LastName?.Trim();
                     subject = new Subject
                     {
                         EventId = captureEvent.Id,
                         FirstName = firstName,
                         LastName = lastName,
-                        DisplayName = $"{firstName} {lastName}",
+                        DisplayName = command.AllowDisplayNameOnly ? row.DisplayName : $"{firstName} {lastName}",
                         CreatedAtUtc = now,
                         IsActive = true
                     };

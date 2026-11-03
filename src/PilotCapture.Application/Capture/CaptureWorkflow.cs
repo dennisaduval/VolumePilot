@@ -17,6 +17,8 @@ public interface ICaptureWorkflowService
     Task SetSmartShooterOutputPathAsync(string path, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CaptureEventChoice>> GetEventsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CaptureGroupChoice>> GetGroupsAsync(string eventId, CancellationToken cancellationToken = default);
+    Task<string> AddTeamAsync(string sessionId, string name, string? context, CancellationToken cancellationToken = default);
+    Task CompleteSubjectAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CaptureSubjectChoice>> GetSubjectsAsync(string groupId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CaptureSubjectChoice>> SearchSubjectsAsync(string eventId, string query, CancellationToken cancellationToken = default);
     Task<ActiveCaptureSession?> GetActiveSessionAsync(CancellationToken cancellationToken = default);
