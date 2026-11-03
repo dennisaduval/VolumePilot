@@ -81,7 +81,11 @@ public sealed partial class MainWindow : Window
             Title = "VolumePilot | Team Volume";
             ChooseJobTypeButton.IsVisible = true;
             WorkspaceLabel.Text = "TEAM VOLUME";
-            FullNameMapping.IsVisible = TeamAthleteList.IsVisible = AddTeamPanel.IsVisible = true;
+            FullNameMapping.IsVisible = TeamRosterPanel.IsVisible = TeamVolumeActions.IsVisible = EditPlayerButton.IsVisible = true;
+            CaptureColumns.ColumnDefinitions = new ColumnDefinitions("1.15*,0.85*,1.25*");
+            CaptureBottomActions.ColumnDefinitions = new ColumnDefinitions("*,*,*,*,1.3*");
+            ManualNameFields.IsVisible = CreateManualSubjectButton.IsVisible = false;
+            WalkInPanel.Header = "Add unidentified subject";
             LeagueFilterPanel.IsVisible = CaptureSubjectCombo.IsVisible = SelectSubjectButton.IsVisible = false;
             RosterContextLabel.Text = "Division / school / sport (optional)";
             TeamSearchBox.PlaceholderText = "Search all teams…";
@@ -830,6 +834,7 @@ public sealed partial class MainWindow : Window
                 StopImageMonitoring();
                 _activeCaptureSession = activeSession with { CurrentCaptureSet = null };
                 CaptureSubjectCombo.SelectedItem = null;
+                if (_teamVolume) await RefreshCaptureSubjectsAsync();
                 SelectedCaptureSubject.Text = "This subject is complete. Select another rostered subject, add a subject, or create an unidentified subject.";
             }
             else
@@ -909,7 +914,20 @@ public sealed partial class MainWindow : Window
         if (_teamVolume)
         {
             var membershipId = _activeCaptureSession?.CurrentCaptureSet?.MembershipId;
-            var rows = subjects.Select(x => new ListBoxItem { Content = FormatSubject(x), Tag = x, MinHeight = 44 }).ToArray();
+            var rows = subjects.Select(x =>
+            {
+                var details = string.Join(" · ", new[] { x.RosterNumber, x.Role, x.HasPhotos ? "✓ Photographed" : null }
+                    .Where(value => !string.IsNullOrWhiteSpace(value)));
+                var label = new StackPanel { Spacing = 2 };
+                label.Children.Add(new TextBlock
+                {
+                    Text = x.DisplayName, FontSize = 20, FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                });
+                if (details.Length != 0)
+                    label.Children.Add(new TextBlock { Text = details, FontSize = 14, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+                return new ListBoxItem { Content = label, Tag = x, MinHeight = 48, HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
+            }).ToArray();
             TeamAthleteList.ItemsSource = rows;
             TeamAthleteList.SelectedItem = rows.FirstOrDefault(x => ((CaptureSubjectChoice)x.Tag!).MembershipId == membershipId);
         }
@@ -1101,6 +1119,8 @@ public sealed partial class MainWindow : Window
         MonitorFolderButton.Content = _isMonitoringImageFolder ? "Stop monitoring" : "Start monitoring";
         SelectSubjectButton.IsEnabled = active && SelectedChoice<CaptureSubjectChoice>(CaptureSubjectCombo) is not null;
         AddTeamButton.IsEnabled = active;
+        AddPlayerButton.IsEnabled = active && _allGroups.Count > 0;
+        EditPlayerButton.IsEnabled = _activeCaptureSession?.CurrentCaptureSet?.MembershipId is not null;
         TeamAthleteList.IsEnabled = active;
         var canAddSubject = active && (!_teamVolume || SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo) is not null);
         CreateManualSubjectButton.IsEnabled = canAddSubject
@@ -1165,19 +1185,127 @@ public sealed partial class MainWindow : Window
 
     private async void OnAddTeamClick(object? sender, RoutedEventArgs e)
     {
+        if (_activeCaptureSession is not { } session) return;
+        var name = new TextBox { MaxLength = 200 };
+        var context = new TextBox { MaxLength = 200 };
+        if (!await ShowRosterFormAsync("Add Team", "Add Team", [("Team name", name), ("School or division (optional)", context)],
+            () => string.IsNullOrWhiteSpace(name.Text) ? "Enter a team name." : null)) return;
+
         await _captureOperationLock.WaitAsync();
         try
         {
-            if (_activeCaptureSession is not { } session) return;
-            var id = await _captureWorkflowService.AddTeamAsync(session.Id, NewTeamName.Text ?? "", NewTeamContext.Text);
+            if (_activeCaptureSession?.Id != session.Id) return;
+            var id = await _captureWorkflowService.AddTeamAsync(session.Id, name.Text ?? "", context.Text);
             _activeCaptureSession = session with { CurrentCaptureSet = null };
-            NewTeamName.Text = NewTeamContext.Text = TeamSearchBox.Text = "";
+            TeamSearchBox.Text = "";
             SelectedCaptureSubject.Text = "Team added. Add an athlete before shooting.";
             await RefreshCaptureGroupsAsync(id);
             await RefreshReviewImagesAsync();
         }
         catch (Exception exception) { SelectedCaptureSubject.Text = $"Team could not be added: {exception.Message}"; }
         finally { _captureOperationLock.Release(); }
+    }
+
+    private async void OnAddPlayerClick(object? sender, RoutedEventArgs e)
+    {
+        if (_activeCaptureSession is not { } session) return;
+        var team = new ComboBox { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, FontSize = 18 };
+        SetChoices(team, _allGroups, TeamLabel, SelectedChoice<CaptureGroupChoice>(CaptureGroupCombo)?.Id);
+        var first = new TextBox { MaxLength = 100 };
+        var last = new TextBox { MaxLength = 100 };
+        var number = new TextBox { MaxLength = 50 };
+        var role = new TextBox { MaxLength = 100 };
+        if (!await ShowRosterFormAsync("Add Player", "Add and select player",
+            [("Team", team), ("First name", first), ("Last name", last), ("Number (optional)", number), ("Role / category (optional)", role)],
+            () => SelectedChoice<CaptureGroupChoice>(team) is null ? "Choose a team."
+                : string.IsNullOrWhiteSpace(first.Text) && string.IsNullOrWhiteSpace(last.Text) ? "Enter at least a first or last name." : null)) return;
+        if (SelectedChoice<CaptureGroupChoice>(team) is not { } selectedTeam) return;
+
+        await _captureOperationLock.WaitAsync();
+        try
+        {
+            if (_activeCaptureSession?.Id != session.Id) return;
+            var captureSet = await _captureWorkflowService.CreateManualSubjectAsync(session.Id,
+                new CaptureSubjectDetails(first.Text, last.Text, number.Text, role.Text), selectedTeam.Id);
+            _activeCaptureSession = session with { CurrentCaptureSet = captureSet };
+            _observedSourceVersions.Clear();
+            TeamSearchBox.Text = SubjectSearchBox.Text = "";
+            SelectedCaptureSubject.Text = $"Selected {captureSet.SubjectName}. Ready for this subject's images.";
+            await RefreshCaptureGroupsAsync(selectedTeam.Id);
+            await RefreshReviewImagesAsync();
+        }
+        catch (Exception exception) { SelectedCaptureSubject.Text = $"Player could not be added: {exception.Message}"; }
+        finally { _captureOperationLock.Release(); }
+    }
+
+    private async void OnEditPlayerClick(object? sender, RoutedEventArgs e)
+    {
+        if (_activeCaptureSession is not { CurrentCaptureSet: { MembershipId: { } membershipId } } session) return;
+        try
+        {
+            CapturePlayerInformation player;
+            await _captureOperationLock.WaitAsync();
+            try { player = await _captureWorkflowService.GetPlayerInformationAsync(session.Id, membershipId); }
+            finally { _captureOperationLock.Release(); }
+
+            var display = new TextBox { Text = player.DisplayName, MaxLength = 250 };
+            var first = new TextBox { Text = player.Details.FirstName, MaxLength = 100 };
+            var last = new TextBox { Text = player.Details.LastName, MaxLength = 100 };
+            var number = new TextBox { Text = player.Details.RosterNumber, MaxLength = 50 };
+            var role = new TextBox { Text = player.Details.Role, MaxLength = 100 };
+            if (!await ShowRosterFormAsync("Edit Player Information", "Save changes",
+                [("Display name", display), ("First name (optional)", first), ("Last name (optional)", last), ("Number (optional)", number), ("Role / category (optional)", role)],
+                () => string.IsNullOrWhiteSpace(display.Text) ? "Enter a display name." : null)) return;
+
+            await _captureOperationLock.WaitAsync();
+            try
+            {
+                if (_activeCaptureSession is not { CurrentCaptureSet: { } current } active ||
+                    active.Id != session.Id || current.MembershipId != membershipId) return;
+                var name = display.Text!.Trim();
+                await _captureWorkflowService.UpdatePlayerInformationAsync(session.Id, membershipId,
+                    new CapturePlayerInformation(name, new CaptureSubjectDetails(first.Text, last.Text, number.Text, role.Text)));
+                _activeCaptureSession = active with { CurrentCaptureSet = current with { SubjectName = name } };
+                ReviewSubjectTitle.Text = $"Image review · {name}";
+                SelectedCaptureSubject.Text = $"Saved player information for {name}.";
+                SubjectSearchBox.Text = "";
+                await RefreshCaptureSubjectsAsync();
+            }
+            finally { _captureOperationLock.Release(); }
+        }
+        catch (Exception exception) { SelectedCaptureSubject.Text = $"Player information could not be saved: {exception.Message}"; }
+    }
+
+    private Task<bool> ShowRosterFormAsync(string title, string saveLabel,
+        (string Label, Control Input)[] fields, Func<string?> validate)
+    {
+        var form = new Window
+        {
+            Title = title, Width = 490, Height = fields.Length > 2 ? 550 : 300,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        var panel = new StackPanel { Margin = new Thickness(22), Spacing = 8 };
+        foreach (var (label, input) in fields)
+        {
+            panel.Children.Add(new TextBlock { Text = label });
+            panel.Children.Add(input);
+        }
+        var message = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        var save = new Button { Content = saveLabel, MinHeight = 44 };
+        var cancel = new Button { Content = "Cancel", MinHeight = 44, IsCancel = true };
+        save.Click += (_, _) =>
+        {
+            if (validate() is { } error) message.Text = error;
+            else form.Close(true);
+        };
+        cancel.Click += (_, _) => form.Close(false);
+        panel.Children.Add(message);
+        var buttons = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10 };
+        buttons.Children.Add(save);
+        buttons.Children.Add(cancel);
+        panel.Children.Add(buttons);
+        form.Content = new ScrollViewer { Content = panel };
+        return form.ShowDialog<bool>(this);
     }
 
     private IEnumerable<CaptureGroupChoice> FilterGroups() => _allGroups.Where(x =>

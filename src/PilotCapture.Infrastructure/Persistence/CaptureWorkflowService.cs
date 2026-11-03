@@ -81,6 +81,48 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         return team.Id;
     }
 
+    private IQueryable<Membership> EditablePlayers(string sessionId) =>
+        dbContext.Memberships.Where(x => x.IsActive && x.Group!.IsActive && x.Subject!.IsActive &&
+            dbContext.CaptureSessions.Any(s => s.Id == sessionId && s.EndedAtUtc == null &&
+                s.EventId == x.Group!.EventId && s.EventId == x.Subject!.EventId));
+
+    public async Task<CapturePlayerInformation> GetPlayerInformationAsync(string sessionId, string membershipId, CancellationToken cancellationToken = default) =>
+        await EditablePlayers(sessionId).AsNoTracking().Where(x => x.Id == membershipId)
+            .Select(x => new CapturePlayerInformation(x.Subject!.DisplayName,
+                new CaptureSubjectDetails(x.Subject!.FirstName, x.Subject!.LastName, x.RosterNumber, x.Role)))
+            .SingleOrDefaultAsync(cancellationToken) ?? throw new InvalidOperationException("The player is unavailable in this session.");
+
+    public async Task UpdatePlayerInformationAsync(string sessionId, string membershipId, CapturePlayerInformation information, CancellationToken cancellationToken = default)
+    {
+        var name = NormalizeOptional(information.DisplayName, 250, nameof(information.DisplayName))
+            ?? throw new ArgumentException("Enter a display name.");
+        var first = NormalizeOptional(information.Details.FirstName, 100, nameof(information.Details.FirstName));
+        var last = NormalizeOptional(information.Details.LastName, 100, nameof(information.Details.LastName));
+        var number = NormalizeOptional(information.Details.RosterNumber, 50, nameof(information.Details.RosterNumber));
+        var role = NormalizeOptional(information.Details.Role, 100, nameof(information.Details.Role));
+        var membership = await EditablePlayers(sessionId).Include(x => x.Subject).SingleOrDefaultAsync(x => x.Id == membershipId, cancellationToken)
+            ?? throw new InvalidOperationException("The player is unavailable in this session.");
+        var subject = membership.Subject!;
+        var memberships = await dbContext.Memberships.Where(x => x.SubjectId == subject.Id).ToListAsync(cancellationToken);
+        subject.DisplayName = name;
+        subject.FirstName = first;
+        subject.LastName = last;
+        membership.RosterNumber = number;
+        membership.Role = role;
+        foreach (var item in memberships)
+        {
+            var fields = item.SpaDataJson is { } json
+                ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json)!
+                : PilotCapture.Application.Rosters.SpaRosterFields.ReadSource(item.SourceDataJson);
+            fields["NAME"] = name;
+            fields["FIRSTNAME"] = first ?? "";
+            fields["LASTNAME"] = last ?? "";
+            if (item.Id == membership.Id) fields["NUMBER"] = number ?? "";
+            item.SpaDataJson = System.Text.Json.JsonSerializer.Serialize(fields);
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task CompleteSubjectAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         await CompleteCurrentCaptureSetAsync(sessionId, DateTimeOffset.UtcNow, cancellationToken);

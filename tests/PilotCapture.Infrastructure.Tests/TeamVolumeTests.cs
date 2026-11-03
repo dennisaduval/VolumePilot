@@ -49,6 +49,17 @@ public sealed class TeamVolumeTests
         var selected = await workflow.SelectSubjectAsync(session.Id, south.MembershipId, token);
         Assert.Equal(teams[1].Id, selected.GroupId);
         Assert.Equal("Junior · Player", south.Role);
+        var player = await workflow.GetPlayerInformationAsync(session.Id, south.MembershipId, token);
+        Assert.Equal("Alex Jones, Jr.", player.DisplayName);
+        await workflow.UpdatePlayerInformationAsync(session.Id, south.MembershipId,
+            new CapturePlayerInformation("Alex Jones III", new CaptureSubjectDetails("Alex", "Jones III", "24", "Captain")), token);
+        var refreshed = (await workflow.GetActiveSessionAsync(token))!.CurrentCaptureSet!;
+        Assert.Equal(selected.CaptureSetId, refreshed.CaptureSetId);
+        Assert.Equal("Alex Jones III", refreshed.SubjectName);
+        var edited = Assert.Single(await workflow.SearchSubjectsAsync(imported.EventId, "24", token));
+        Assert.Equal(south.MembershipId, edited.MembershipId);
+        Assert.Equal("Captain", edited.Role);
+        Assert.Equal(rows[1].SourceDataJson, (await db.Memberships.SingleAsync(x => x.Id == south.MembershipId, token)).SourceDataJson);
         var newTeam = await workflow.AddTeamAsync(session.Id, "Tigers", "JV", token);
         Assert.Null((await workflow.GetActiveSessionAsync(token))!.CurrentCaptureSet);
         var walkIn = await workflow.CreateManualSubjectAsync(session.Id, new CaptureSubjectDetails("Robin", "Lee", "12", "Player"), newTeam, token);

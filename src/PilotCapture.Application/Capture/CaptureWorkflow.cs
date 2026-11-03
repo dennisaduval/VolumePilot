@@ -6,6 +6,7 @@ public sealed record CaptureEventChoice(string Id, string Name);
 public sealed record CaptureGroupChoice(string Id, string EventId, string Name, string? LeagueName = null);
 public sealed record CaptureSubjectChoice(string SubjectId, string MembershipId, string DisplayName, string? RosterNumber, string? Role, bool HasPhotos = false, string? GroupId = null, string? GroupName = null, bool IsUnidentified = false);
 public sealed record CaptureSubjectDetails(string? FirstName, string? LastName, string? RosterNumber, string? Role);
+public sealed record CapturePlayerInformation(string DisplayName, CaptureSubjectDetails Details);
 public sealed record ActiveCaptureSession(string Id, string EventId, string EventName, string PhotographerName, string ProfileName, CaptureWorkflowType WorkflowType, string StationCode, DateTimeOffset StartedAtUtc, CaptureSetResult? CurrentCaptureSet);
 public sealed record CaptureSetResult(string CaptureSetId, string SubjectName, bool IsUnidentified, string? GroupId, string? MembershipId, DateTimeOffset StartedAtUtc);
 
@@ -18,6 +19,8 @@ public interface ICaptureWorkflowService
     Task<IReadOnlyList<CaptureEventChoice>> GetEventsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CaptureGroupChoice>> GetGroupsAsync(string eventId, CancellationToken cancellationToken = default);
     Task<string> AddTeamAsync(string sessionId, string name, string? context, CancellationToken cancellationToken = default);
+    Task<CapturePlayerInformation> GetPlayerInformationAsync(string sessionId, string membershipId, CancellationToken cancellationToken = default);
+    Task UpdatePlayerInformationAsync(string sessionId, string membershipId, CapturePlayerInformation information, CancellationToken cancellationToken = default);
     Task CompleteSubjectAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CaptureSubjectChoice>> GetSubjectsAsync(string groupId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CaptureSubjectChoice>> SearchSubjectsAsync(string eventId, string query, CancellationToken cancellationToken = default);

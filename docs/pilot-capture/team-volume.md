@@ -20,10 +20,12 @@ output folder.
    the entire job; each result shows its team. Selecting a result switches both
    the team and athlete. Photographed athletes remain selectable for more photos
    and review.
-4. Use **Add team** to create and select a new team. Enter a school or division
-   when another team has the same name. Use **Add new / unrostered subject**
-   to add someone to the selected team and start their capture. The original
-   CSV stays intact; use **Export new roster** for updated roster data.
+4. Use **Add Team** or **Add Player** in the Capture header. The Add Player
+   form defaults to the current team and lets you choose any existing team.
+   After saving, the team and player are selected for capture.
+5. Tap a player in the right-hand roster and use **Edit Player Information**
+   at the bottom. Changes keep the player's existing photos and leave the
+   original CSV intact. Use **Export new roster** for updated roster data.
 
 The app saves athletes and team memberships in the existing SQLite portrait
 model. A roster can contain separate memberships for the same name, and

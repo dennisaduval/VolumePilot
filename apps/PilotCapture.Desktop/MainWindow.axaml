@@ -151,9 +151,15 @@
               <TextBlock x:Name="ReviewSubjectTitle" Text="Team and Individual capture" FontSize="24" FontWeight="SemiBold" />
               <TextBlock x:Name="ReviewStatus" Text="Start a session, then select an athlete." TextWrapping="Wrap" />
             </StackPanel>
-            <TextBlock Grid.Column="1" x:Name="AthleteCount" FontSize="18" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Spacing="4">
+              <StackPanel x:Name="TeamVolumeActions" IsVisible="False" Orientation="Horizontal" Spacing="8">
+                <Button x:Name="AddTeamButton" Content="Add Team" MinHeight="44" Click="OnAddTeamClick" />
+                <Button x:Name="AddPlayerButton" Content="Add Player" MinHeight="44" Click="OnAddPlayerClick" />
+              </StackPanel>
+              <TextBlock x:Name="AthleteCount" FontSize="18" HorizontalAlignment="Right" />
+            </StackPanel>
           </Grid>
-          <Grid Grid.Row="1" ColumnDefinitions="2*,3*" ColumnSpacing="20">
+          <Grid x:Name="CaptureColumns" Grid.Row="1" ColumnDefinitions="2*,3*" ColumnSpacing="14">
             <Border Padding="10" Background="White" CornerRadius="8">
               <Grid RowDefinitions="*,Auto" RowSpacing="8">
                 <Image x:Name="SelectedImagePreview" Stretch="Uniform" HorizontalAlignment="Center" />
@@ -171,21 +177,13 @@
                 <ComboBox x:Name="CaptureGroupCombo" PlaceholderText="Select team" SelectionChanged="OnCaptureGroupChanged" FontSize="20" />
                 <TextBox x:Name="SubjectSearchBox" PlaceholderText="Search this job by name, number or team…" TextChanged="OnSubjectSearchChanged" />
                 <ListBox x:Name="SubjectSearchResults" IsVisible="False" MaxHeight="180" SelectionChanged="OnSearchResultSelected" />
-                <ListBox x:Name="TeamAthleteList" IsVisible="False" MinHeight="112" MaxHeight="240" SelectionChanged="OnTeamAthleteSelected" />
                 <ComboBox x:Name="CaptureSubjectCombo" FontSize="20" SelectionChanged="OnAthleteSelectionChanged" />
                 <Button Classes="primary-action" x:Name="SelectSubjectButton" Content="Select athlete" IsEnabled="False" Click="OnSelectSubjectClick" />
                 <TextBlock x:Name="SelectedCaptureSubject" Text="No subject selected." TextWrapping="Wrap" FontSize="18" />
                 <Button Classes="forward-action" x:Name="NextSubjectButton" Content="Complete subject · next unphotographed" MinHeight="64" FontSize="20" IsEnabled="False" Click="OnNextSubjectClick" />
-                <Expander x:Name="AddTeamPanel" Header="Add team" IsVisible="False">
+                <Expander x:Name="WalkInPanel" Header="Add new / unrostered subject">
                   <StackPanel Spacing="8">
-                    <TextBox x:Name="NewTeamName" PlaceholderText="Team name" />
-                    <TextBox x:Name="NewTeamContext" PlaceholderText="School or division (optional)" />
-                    <Button x:Name="AddTeamButton" Content="Add and select team" MinHeight="44" Click="OnAddTeamClick" />
-                  </StackPanel>
-                </Expander>
-                <Expander Header="Add new / unrostered subject">
-                  <StackPanel Spacing="8">
-                    <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">
+                    <Grid x:Name="ManualNameFields" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">
                       <TextBox x:Name="ManualFirstName" PlaceholderText="First name (optional)" />
                       <TextBox Grid.Column="1" x:Name="ManualLastName" PlaceholderText="Last name (optional)" />
                       <TextBox Grid.Row="1" x:Name="ManualRosterNumber" PlaceholderText="Number (optional)" />
@@ -198,6 +196,11 @@
                 </Expander>
               </StackPanel>
             </ScrollViewer>
+            <Grid x:Name="TeamRosterPanel" Grid.Column="2" IsVisible="False" RowDefinitions="Auto,*" RowSpacing="8">
+              <TextBlock Text="Players on this team" FontSize="20" FontWeight="SemiBold" />
+              <ListBox x:Name="TeamAthleteList" Grid.Row="1" SelectionChanged="OnTeamAthleteSelected"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+            </Grid>
           </Grid>
           <ListBox x:Name="CaptureImagesList" Grid.Row="2" SelectionChanged="OnReviewImageSelectionChanged"
                    ScrollViewer.HorizontalScrollBarVisibility="Visible" ScrollViewer.VerticalScrollBarVisibility="Disabled"
@@ -212,11 +215,14 @@
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
-          <Grid Grid.Row="3" ColumnDefinitions="*,*,*,*" ColumnSpacing="12">
+          <Grid x:Name="CaptureBottomActions" Grid.Row="3" ColumnDefinitions="*,*,*,*" ColumnSpacing="12">
             <Button x:Name="SetPrimaryButton" Content="Primary" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnSetPrimaryClick" />
             <Button Grid.Column="1" x:Name="SetSecondaryButton" Content="Secondary" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnSetSecondaryClick" />
             <Button Grid.Column="2" x:Name="ToggleBannerButton" Content="Banner" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnToggleBannerClick" />
             <Button Grid.Column="3" x:Name="RejectImageButton" Content="Reject" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnRejectImageClick" />
+            <Button Grid.Column="4" x:Name="EditPlayerButton" IsVisible="False" IsEnabled="False" HorizontalAlignment="Stretch" Click="OnEditPlayerClick">
+              <TextBlock Text="Edit Player Information" TextWrapping="Wrap" />
+            </Button>
           </Grid>
         </Grid>
       </TabItem>
