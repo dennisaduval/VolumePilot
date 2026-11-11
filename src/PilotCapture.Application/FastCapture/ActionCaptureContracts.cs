@@ -11,6 +11,7 @@ public interface IActionCaptureService
     Task EnableAsync(string jobId, long utcTicks, CancellationToken token = default);
     Task ReceiveSmartShooterAsync(string jobId, string json, long receivedUtcTicks, CancellationToken token = default);
     Task VerifyClockAsync(string jobId, string photoKey, long requestUtcTicks, long observedUtcTicks, CancellationToken token = default);
+    Task<bool> TryVerifyClockPhotoAsync(string jobId, string photoKey, string? sourcePath, long requestUtcTicks, long observedUtcTicks, CancellationToken token = default);
     Task InvalidateCameraAsync(string jobId, string cameraKey, long utcTicks, CancellationToken token = default);
     Task<ActionCaptureStatus> GetStatusAsync(string jobId, CancellationToken token = default);
     Task<bool> HasCameraTransfersAsync(string jobId, CancellationToken token = default);

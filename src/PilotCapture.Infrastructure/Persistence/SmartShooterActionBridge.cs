@@ -14,7 +14,13 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
 {
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentQueue<bool> _verify = new();
-    private readonly Dictionary<string, (long Utc, long Monotonic)> _tests = [];
+    private sealed record ClockTest(string Camera, long Utc, long Monotonic)
+    {
+        public string? PhotoKey { get; set; }
+        public string? SourcePath { get; set; }
+        public long? ExposureObservedUtc { get; set; }
+    }
+    private readonly Dictionary<string, ClockTest> _tests = [];
     private readonly HashSet<string> _seenCameras = [];
     private Task? _task;
     private string _status = "Connecting to SS External API on this laptop…";
@@ -36,6 +42,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
     private void Process(string json)
     {
         var received = DateTime.UtcNow.Ticks;
+        var observedAt = Stopwatch.GetTimestamp();
         using var doc = JsonDocument.Parse(json);
         var message = doc.RootElement;
         if (Text(message, "msg_type") == "Event" && message.TryGetProperty("msg_seq_num", out var sequence) && sequence.TryGetInt64(out var number))
@@ -50,14 +57,37 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
         void Photo(JsonElement photo)
         {
             var origin = Text(photo, "PhotoOrigin");
-            if (!_tests.TryGetValue(origin, out var test) || !ActionCaptureService.TryCameraTime(Text(photo, "PhotoDateCaptured"), out _)) return;
-            _tests.Remove(origin);
-            var wallElapsed = TimeSpan.FromTicks(received - test.Utc);
-            var elapsed = Stopwatch.GetElapsedTime(test.Monotonic);
-            if (Math.Abs((wallElapsed - elapsed).TotalMilliseconds) > 250)
-                throw new InvalidOperationException("Laptop clock changed during verification. Verify cameras again.");
-            Service(s => s.VerifyClockAsync(jobId, Text(photo, "PhotoKey"), test.Utc, received, _stop.Token));
-            Volatile.Write(ref _status, "Camera time verified. Test frames stay out of team output.");
+            var photoKey = Text(photo, "PhotoKey");
+            if (photoKey.Length == 0) return;
+            // The first marked photo event bounds the exposure even if the
+            // timestamp or disk path is only reported when the JPEG arrives.
+            if (_tests.TryGetValue(origin, out var test) && Text(photo, "CameraKey") == test.Camera &&
+                (test.PhotoKey is null || test.PhotoKey == photoKey))
+            {
+                var elapsed = Stopwatch.GetElapsedTime(test.Monotonic, observedAt);
+                if (Math.Abs((TimeSpan.FromTicks(received - test.Utc) - elapsed).TotalMilliseconds) > 250)
+                {
+                    _tests.Remove(origin);
+                    throw new InvalidOperationException("Laptop clock changed during verification. Verify cameras again.");
+                }
+                test.PhotoKey = photoKey;
+                test.ExposureObservedUtc ??= received;
+            }
+            var pending = _tests.FirstOrDefault(x => x.Value.PhotoKey == photoKey);
+            if (pending.Value is not { } clock) return;
+            if (Text(photo, "PhotoFilename") is { Length: > 0 } path) clock.SourcePath = path;
+            if (clock.ExposureObservedUtc is not { } observed) return;
+            try
+            {
+                if (!Service(s => s.TryVerifyClockPhotoAsync(jobId, photoKey, clock.SourcePath, clock.Utc, observed, _stop.Token))) return;
+                _tests.Remove(pending.Key);
+                Volatile.Write(ref _status, "Camera time verified. Test frames stay out of team output.");
+            }
+            catch
+            {
+                _tests.Remove(pending.Key);
+                throw;
+            }
         }
         var root = doc.RootElement;
         if (Text(root, "msg_id") == "PhotoUpdated") Photo(root);
@@ -152,7 +182,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                             foreach (var camera in online)
                             {
                                 var origin = ActionCaptureService.ClockOrigin + Ids.New();
-                                _tests[origin] = (DateTime.UtcNow.Ticks, Stopwatch.GetTimestamp());
+                                _tests[origin] = new(camera.CameraKey, DateTime.UtcNow.Ticks, Stopwatch.GetTimestamp());
                                 if (!Request("Shoot", new() { ["CameraSelection"] = "Single", ["CameraKey"] = camera.CameraKey, ["PhotoOrigin"] = origin }))
                                 { _tests.Remove(origin); Volatile.Write(ref _status, "SS clock test timed out; let transfers finish and verify again."); }
                             }
@@ -161,7 +191,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                     }
                     else if (now >= nextIdleCheck) nextIdleCheck = now.AddSeconds(5);
                     foreach (var key in _tests.Where(t => Stopwatch.GetElapsedTime(t.Value.Monotonic) > TimeSpan.FromSeconds(10)).Select(t => t.Key).ToArray())
-                    { _tests.Remove(key); Volatile.Write(ref _status, "Clock test metadata missing. Verify again when SS is idle."); }
+                    { _tests.Remove(key); Volatile.Write(ref _status, "Clock test capture time missing from SS and the original JPEG. Verify again when SS is idle."); }
                     _stop.Token.WaitHandle.WaitOne(50);
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }

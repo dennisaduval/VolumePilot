@@ -154,6 +154,54 @@ public sealed class ActionCaptureTests
         Assert.Equal("Calibration", (await env.Db.ActionReceipts.SingleAsync(token)).State);
     }
 
+    [Fact]
+    public async Task Original_jpeg_time_can_verify_camera_and_route_delayed_photos_without_ss_capture_time()
+    {
+        await using var env = await Env.CreateAsync();
+        var token = TestContext.Current.CancellationToken;
+        var t = new DateTime(2026, 11, 11, 10, 0, 0, DateTimeKind.Utc);
+        await env.Action.EnableAsync(env.Job, t.Ticks, token);
+        await env.Action.ReceiveSmartShooterAsync(env.Job, """{"msg_id":"CameraUpdated","CameraKey":"r3","CameraStatus":"Ready"}""", t.Ticks, token);
+        var clockPath = await env.FileAsync("r3-clock.jpg");
+        await File.WriteAllBytesAsync(clockPath, JpegAt(t), token);
+        var clock = env.Photo("r3-clock", "r3", clockPath, t.Ticks);
+        clock.Remove("PhotoDateCaptured");
+        clock["PhotoOrigin"] = ActionCaptureService.ClockOrigin + "r3";
+        await env.Action.ReceiveSmartShooterAsync(env.Job,
+            JsonSerializer.Serialize(new { msg_id = "Synchronise", PhotoInfo = new[] { clock } }), t.AddSeconds(5).Ticks, token);
+        Assert.True(await env.Action.TryVerifyClockPhotoAsync(env.Job, "r3-clock", clockPath, t.Ticks, t.AddMilliseconds(200).Ticks, token));
+
+        await env.Fast.SelectTeamAsync(env.Job, "B", token, t.AddMinutes(3).Ticks);
+        var latePath = await env.FileAsync("r3-late.jpg");
+        await File.WriteAllBytesAsync(latePath, JpegAt(t.AddMinutes(2)), token);
+        var missingPath = await env.FileAsync("r3-missing.jpg");
+        var late = env.Photo("r3-late", "r3", latePath, t.Ticks);
+        var missing = env.Photo("r3-missing", "r3", missingPath, t.Ticks);
+        late.Remove("PhotoDateCaptured"); missing.Remove("PhotoDateCaptured");
+        await env.Action.ReceiveSmartShooterAsync(env.Job,
+            JsonSerializer.Serialize(new { msg_id = "Synchronise", PhotoInfo = new[] { late, missing } }), t.AddMinutes(4).Ticks, token);
+        await env.Fast.ScanAsync(env.Job, token);
+
+        var assigned = await env.Db.FastImages.SingleAsync(token);
+        Assert.Equal("A", (await env.Db.FastTeams.SingleAsync(x => x.Id == assigned.TeamId, token)).Name);
+        Assert.True(File.Exists(assigned.DeliveredPath));
+        Assert.Equal("Calibration", (await env.Db.ActionReceipts.SingleAsync(r => r.SourcePath == clockPath, token)).State);
+        var held = Assert.Single((await env.Action.GetStatusAsync(env.Job, token)).Held);
+        Assert.Equal(missingPath, held.SourcePath);
+        Assert.Equal("No capture time in SS or original JPEG", held.Issue);
+    }
+
+    private static byte[] JpegAt(DateTime time) =>
+    [
+        0xff, 0xd8, 0xff, 0xe1, 0, 72, (byte)'E', (byte)'x', (byte)'i', (byte)'f', 0, 0,
+        // TIFF: IFD0 points to the Exif IFD at byte 26; the timestamp begins at byte 44.
+        (byte)'I', (byte)'I', 42, 0, 8, 0, 0, 0,
+        1, 0, 0x69, 0x87, 4, 0, 1, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0,
+        1, 0, 3, 0x90, 2, 0, 20, 0, 0, 0, 44, 0, 0, 0, 0, 0, 0, 0,
+        .. System.Text.Encoding.ASCII.GetBytes(time.ToString("yyyy:MM:dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)), 0,
+        0xff, 0xd9
+    ];
+
     private sealed class Env : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "vp-action-" + Guid.NewGuid().ToString("N"));

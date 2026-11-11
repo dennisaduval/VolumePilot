@@ -126,11 +126,35 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
         var photo = await db.ActionPhotoMetadatas.SingleAsync(p => p.JobId == jobId && p.PhotoKey == photoKey, token);
         if (!photo.Origin.StartsWith(ClockOrigin, StringComparison.Ordinal) || photo.CameraTicks is null || photo.CameraKey.Length == 0 || photo.HasConflict)
             throw new ArgumentException("A marked SS clock verification photo with capture time and camera identity is required.");
+        await SaveClockSampleAsync(photo, photo.CameraTicks.Value, requestUtcTicks, observedUtcTicks, token);
+    }
+
+    public async Task<bool> TryVerifyClockPhotoAsync(string jobId, string photoKey, string? sourcePath, long requestUtcTicks, long observedUtcTicks, CancellationToken token = default)
+    {
+        var photo = await db.ActionPhotoMetadatas.SingleOrDefaultAsync(p => p.JobId == jobId && p.PhotoKey == photoKey, token);
+        if (photo is null || !photo.Origin.StartsWith(ClockOrigin, StringComparison.Ordinal) || photo.CameraKey.Length == 0 || photo.HasConflict)
+            return false;
+        var ticks = photo.CameraTicks;
+        if (ticks is null && sourcePath is not null && photo.Location == "Local Disk" &&
+            Path.GetExtension(sourcePath) is { } extension &&
+            (extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase) || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)) &&
+            photo.PathKey == PathKey(sourcePath) &&
+            !await db.ActionPhotoMetadatas.AnyAsync(p => p.JobId == jobId && p.PathKey == photo.PathKey && p.PhotoKey != photoKey, token))
+            ticks = JpegCaptureTime.Read(sourcePath);
+        if (ticks is null) return false;
+        await SaveClockSampleAsync(photo, ticks.Value, requestUtcTicks, observedUtcTicks, token);
+        return true;
+    }
+
+    private async Task SaveClockSampleAsync(ActionPhotoMetadata photo, long cameraTicks, long requestUtcTicks, long observedUtcTicks, CancellationToken token)
+    {
+        var jobId = photo.JobId;
+        var photoKey = photo.PhotoKey;
         var elapsed = observedUtcTicks - requestUtcTicks;
         if (elapsed < 0 || elapsed > TimeSpan.FromSeconds(2).Ticks)
             throw new InvalidOperationException("Clock test took too long. Let transfers finish, then verify again.");
         if (await db.ActionClockSamples.AnyAsync(s => s.JobId == jobId && s.VerificationPhotoKey == photoKey, token)) return;
-        var offset = requestUtcTicks + elapsed / 2 - photo.CameraTicks.Value;
+        var offset = requestUtcTicks + elapsed / 2 - cameraTicks;
         var uncertainty = elapsed / 2 + TimeSpan.FromSeconds(1).Ticks;
         var previous = await db.ActionClockSamples.Where(s => s.JobId == jobId && s.CameraKey == photo.CameraKey).OrderByDescending(s => s.FromUtcTicks).FirstOrDefaultAsync(token);
         var changed = previous is not null && Math.Abs((double)offset - previous.OffsetTicks) > uncertainty + previous.UncertaintyTicks + TimeSpan.FromSeconds(2).Ticks;
@@ -232,7 +256,7 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
         {
             var candidates = metadata.Where(m => m.PathKey == receipt.PathKey).ToArray();
             if (candidates.Length != 1) { receipt.Issue = candidates.Length == 0 ? "Waiting for SS metadata" : "Filename identifies multiple SS photos; select performance"; continue; }
-            var photo = candidates[0]; receipt.PhotoKey = photo.PhotoKey; receipt.CameraKey = photo.CameraKey; receipt.CameraTicks = photo.CameraTicks;
+            var photo = candidates[0]; receipt.PhotoKey = photo.PhotoKey; receipt.CameraKey = photo.CameraKey;
             if (await db.ActionReceipts.AnyAsync(r => r.JobId == job.Id && r.Id != receipt.Id && r.PhotoKey == photo.PhotoKey, token))
             { receipt.Issue = "Source filename reused; select the correct performance"; continue; }
             if (photo.Origin.StartsWith(ClockOrigin, StringComparison.Ordinal) || clocks.Any(c => c.VerificationPhotoKey == photo.PhotoKey)) { receipt.State = "Calibration"; receipt.Issue = "Clock test: excluded from team output"; continue; }
@@ -240,8 +264,13 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
             // an ordinary shot while its identifying PhotoOrigin is still missing.
             if (string.IsNullOrWhiteSpace(photo.Origin)) { receipt.Issue = "Waiting for SS capture origin"; continue; }
             if (photo.HasConflict) { receipt.Issue = "SS metadata changed identity, path or capture time; select performance"; continue; }
-            if (photo.CameraTicks is null) { receipt.Issue = "Missing original capture time"; continue; }
-            var match = ActionTimeRouting.Resolve(photo.CameraTicks.Value, clocks.Where(c => c.CameraKey == photo.CameraKey).ToArray(), changes);
+            // Read original EXIF from the archived copy, never from the filesystem clock.
+            // A prior unsuccessful lookup on an immutable archive need not repeat.
+            var captureTicks = photo.CameraTicks ?? (receipt.Issue == "No capture time in SS or original JPEG"
+                ? null : receipt.CameraTicks ?? JpegCaptureTime.Read(receipt.StoredPath));
+            receipt.CameraTicks = captureTicks;
+            if (captureTicks is null) { receipt.Issue = "No capture time in SS or original JPEG"; continue; }
+            var match = ActionTimeRouting.Resolve(captureTicks.Value, clocks.Where(c => c.CameraKey == photo.CameraKey).ToArray(), changes);
             receipt.CorrectedUtcTicks = match.UtcTicks; receipt.ClockSampleId = match.SampleId; receipt.Issue = match.Issue;
             if (match.TeamId is { } teamId) await RouteAsync(receipt, teamId, token);
         }
