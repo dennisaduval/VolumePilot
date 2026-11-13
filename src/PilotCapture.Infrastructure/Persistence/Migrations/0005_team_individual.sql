@@ -1,0 +1,20 @@
+ALTER TABLE events ADD COLUMN job_type INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE local_installation ADD COLUMN master_media_path TEXT NULL;
+ALTER TABLE memberships ADD COLUMN spa_data_json TEXT NULL;
+ALTER TABLE image_assets ADD COLUMN edited_path TEXT NULL;
+ALTER TABLE image_assets ADD COLUMN edited_sha256 TEXT NULL;
+ALTER TABLE image_assets ADD COLUMN edited_at_utc TEXT NULL;
+ALTER TABLE capture_images ADD COLUMN selection_scope_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE capture_images ADD COLUMN is_secondary INTEGER NOT NULL DEFAULT 0 CHECK(is_secondary IN (0,1));
+DROP INDEX ix_capture_images_one_primary_per_set;
+UPDATE capture_images SET selection_scope_id = (SELECT COALESCE(membership_id,subject_id) FROM capture_sets WHERE id = capture_images.capture_set_id);
+-- Preserve the earliest existing selection across repeat visits. Rejected photos cannot hold roles.
+UPDATE capture_images SET is_primary = 0, is_banner = 0 WHERE review_state = 2;
+UPDATE capture_images SET is_primary = 0 WHERE is_primary = 1 AND id != (SELECT MIN(c.id) FROM capture_images c WHERE c.selection_scope_id = capture_images.selection_scope_id AND c.is_primary = 1);
+UPDATE capture_images SET is_banner = 0 WHERE is_banner = 1 AND id != (SELECT MIN(c.id) FROM capture_images c WHERE c.selection_scope_id = capture_images.selection_scope_id AND c.is_banner = 1);
+UPDATE capture_images SET is_primary = 1 WHERE review_state != 2 AND id = (SELECT MIN(c.id) FROM capture_images c WHERE c.selection_scope_id = capture_images.selection_scope_id AND c.review_state != 2) AND NOT EXISTS(SELECT 1 FROM capture_images c WHERE c.selection_scope_id = capture_images.selection_scope_id AND c.is_primary = 1);
+UPDATE capture_images SET is_secondary = 1 WHERE review_state != 2 AND id = COALESCE((SELECT MIN(c.id) FROM capture_images c WHERE c.selection_scope_id = capture_images.selection_scope_id AND c.review_state != 2 AND c.is_primary = 0),(SELECT c.id FROM capture_images c WHERE c.selection_scope_id = capture_images.selection_scope_id AND c.is_primary = 1));
+UPDATE capture_images SET is_banner = 1 WHERE is_primary = 1 AND NOT EXISTS(SELECT 1 FROM capture_images c WHERE c.selection_scope_id = capture_images.selection_scope_id AND c.is_banner = 1);
+CREATE UNIQUE INDEX ix_capture_images_primary_scope ON capture_images(selection_scope_id) WHERE is_primary = 1;
+CREATE UNIQUE INDEX ix_capture_images_secondary_scope ON capture_images(selection_scope_id) WHERE is_secondary = 1;
+CREATE UNIQUE INDEX ix_capture_images_banner_scope ON capture_images(selection_scope_id) WHERE is_banner = 1;
