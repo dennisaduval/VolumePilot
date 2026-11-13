@@ -33,12 +33,14 @@ public sealed partial class FastCaptureWindow : Window
     private string? _scheduleSignature;
     private string? _actionProgressJob;
     private DateTime _nextActionRefresh;
+    private long? _lastActionChangeoverTicks;
+    private bool _actionClockVerified;
     public event Action? ReturnRequested;
     private bool UsesPlayers => _type == CaptureJobType.PrintOnSiteTeamAndIndividual;
     public FastCaptureWindow(CaptureJobType type, FastCaptureController controller)
     {
         _type = type; _controller = controller; _controller.ActionMode = type == CaptureJobType.ActionPhotography; InitializeComponent();
-        ActionSetup.IsVisible = _controller.ActionMode;
+        ActionSetup.IsVisible = ActionChangeoverCue.IsVisible = _controller.ActionMode;
         ImagesList.ItemTemplate = new FuncDataTemplate<FastCaptureImage>((image, _) => image is null ? null : ImageRow(image));
         TeamSuggestions.PlacementTarget = TeamName;
         PerformanceSuggestions.AddHandler(InputElement.PointerReleasedEvent, OnSuggestionPicked, RoutingStrategies.Bubble, handledEventsToo: true);
@@ -117,6 +119,11 @@ public sealed partial class FastCaptureWindow : Window
                 var action = await _controller.ActionAsync(s => s.GetStatusAsync(job.Id));
                 if (_closed || _jobId != job.Id) return;
                 _actionProgressJob = job.Id; _nextActionRefresh = DateTime.UtcNow.AddSeconds(1);
+                _lastActionChangeoverTicks = action.LatestChangeoverUtcTicks;
+                var activeCameras = action.Cameras.Where(c => c.Status is "Ready" or "Busy").ToArray();
+                var nowTicks = DateTime.UtcNow.Ticks;
+                _actionClockVerified = activeCameras.Length > 0 && activeCameras.All(camera =>
+                    action.Clocks.Any(c => c.CameraKey == camera.CameraKey && c.FromUtcTicks <= nowTicks && c.UntilUtcTicks > nowTicks));
                 ActionClockStatus.Text = _controller.ActionConnectionStatus + "\n" + string.Join(" · ", action.Cameras.Select(camera =>
                 {
                     var clock = action.Clocks.Where(c => c.CameraKey == camera.CameraKey && c.UntilUtcTicks > DateTime.UtcNow.Ticks).OrderByDescending(c => c.FromUtcTicks).FirstOrDefault();
@@ -127,6 +134,7 @@ public sealed partial class FastCaptureWindow : Window
                     string.Join(" · ", action.Progress.Where(p => p.Pending > 0 || p.TeamId == job.CurrentTeamId).OrderBy(p => p.TeamId == job.CurrentTeamId ? 0 : 1).ThenByDescending(p => p.Pending).Take(8)
                         .Select(p => $"{p.Team}: {p.Delivered} delivered, {p.Pending} pending"));
             }
+            if (_controller.ActionMode) UpdateActionChangeoverCue();
             var signature = job.CurrentTeamId + ":" + (UsesPlayers ? team?.CurrentPlayer : 0) + "|" +
                 string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}:{x.IndividualDeliveredPath}:{x.DeliveredPath}"));
             if (_displaySignature != signature)
@@ -145,6 +153,19 @@ public sealed partial class FastCaptureWindow : Window
         }
         catch (Exception exception) { Status.Text = exception.Message; }
         finally { _refreshing = false; _refreshCompletion = null; completion.TrySetResult(true); }
+    }
+    private void UpdateActionChangeoverCue()
+    {
+        var seconds = _lastActionChangeoverTicks is { } changeover
+            ? ActionTimeRouting.ChangeoverCueRemainingSeconds(changeover, DateTime.UtcNow.Ticks) : 0;
+        if (_snapshot?.Job.CurrentTeamId is null)
+            ActionChangeoverCue.Text = "Select a performance to start.";
+        else if (!_actionClockVerified)
+            ActionChangeoverCue.Text = "Verify cameras before shooting.";
+        else if (seconds > 0)
+            ActionChangeoverCue.Text = $"New team selected. Start shooting in {seconds} s.";
+        else
+            ActionChangeoverCue.Text = "At the break: wait 3 s after the last shot, then select the next team.";
     }
     private FastCaptureImage? SelectedImage() => ImagesList.SelectedIndex >= 0 && _snapshot is not null && ImagesList.SelectedIndex < _snapshot.Images.Count ? _snapshot.Images[ImagesList.SelectedIndex] : null;
     private void UpdateButtons()
@@ -230,7 +251,7 @@ public sealed partial class FastCaptureWindow : Window
         await _controller.StopAsync(); await _controller.DisconnectActionAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
         Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
-        CurrentPlayer.Text = PhotoCount.Text = ActivePerformance.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; ClearTeamSearch();
+        CurrentPlayer.Text = PhotoCount.Text = ActivePerformance.Text = ActionChangeoverCue.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; ClearTeamSearch();
         ScheduleFilters.IsVisible = false; _scheduleSignature = null;
     });
     private async void OnSwitchTeamClick(object? sender, RoutedEventArgs e) => await SelectOrAddTeamAsync();

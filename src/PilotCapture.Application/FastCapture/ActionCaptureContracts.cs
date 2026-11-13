@@ -4,7 +4,7 @@ namespace PilotCapture.Application.FastCapture;
 
 public sealed record ActionTeamProgress(string TeamId, string Team, int Received, int Pending, int Delivered);
 public sealed record ActionCaptureStatus(IReadOnlyList<ActionCamera> Cameras, IReadOnlyList<ActionClockSample> Clocks,
-    IReadOnlyList<ActionReceipt> Held, int HeldCount, IReadOnlyList<ActionTeamProgress> Progress);
+    IReadOnlyList<ActionReceipt> Held, int HeldCount, IReadOnlyList<ActionTeamProgress> Progress, long? LatestChangeoverUtcTicks = null);
 
 public interface IActionCaptureService
 {

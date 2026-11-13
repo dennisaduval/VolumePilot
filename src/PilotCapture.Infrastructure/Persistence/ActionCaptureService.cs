@@ -177,7 +177,8 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
         return new(await db.ActionCameras.AsNoTracking().Where(c => c.JobId == jobId).OrderBy(c => c.Name).ToListAsync(token),
             await db.ActionClockSamples.AsNoTracking().Where(c => c.JobId == jobId).ToListAsync(token),
             await db.ActionReceipts.AsNoTracking().Where(r => r.JobId == jobId && r.State == "Held").OrderBy(r => r.Id).Take(100).ToListAsync(token),
-            await db.ActionReceipts.CountAsync(r => r.JobId == jobId && r.State == "Held", token), progress);
+            await db.ActionReceipts.CountAsync(r => r.JobId == jobId && r.State == "Held", token), progress,
+            await db.ActionChangeovers.Where(c => c.JobId == jobId).MaxAsync(c => (long?)c.UtcTicks, token));
     }
 
     public Task<bool> HasCameraTransfersAsync(string jobId, CancellationToken token = default) =>
