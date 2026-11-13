@@ -36,7 +36,13 @@ public sealed class SmartShooterBridgeTests
                     if (id is "Synchronise" or "GetCamera")
                     {
                         reply["CameraInfo"] = new[] { new { CameraKey = "canon-r6ii-test", CameraName = "Canon R6 II", CameraStatus = "Ready" } };
-                        if (id == "Synchronise") reply["PhotoInfo"] = photo is null ? Array.Empty<object>() : new object[] { photo };
+                        if (id == "Synchronise")
+                        {
+                            // A card-only record can survive reconnects. It must
+                            // not block an explicit verification of a ready camera.
+                            var onCard = new { PhotoKey = "old-card-photo", CameraKey = "canon-r6ii-test", PhotoLocation = "Camera" };
+                            reply["PhotoInfo"] = photo is null ? new object[] { onCard } : new object[] { onCard, photo };
+                        }
                     }
                     else if (id == "Shoot")
                     {
@@ -48,17 +54,13 @@ public sealed class SmartShooterBridgeTests
                             ["PhotoOrigin"] = request.GetProperty("PhotoOrigin").GetString(), ["PhotoDateCaptured"] = DateTime.UtcNow.AddDays(-400).ToString("yyyyMMdd HH:mm:ss.fff"),
                             ["PhotoLocation"] = "Local Disk", ["PhotoFilename"] = path };
                     }
-                    else
-                    {
-                        Assert.Equal("CheckClocks", id);
-                        reply["msg_result"] = false; // Supported capture need not imply camera clock-read support.
-                    }
+                    else throw new InvalidOperationException($"Unexpected Smart Shooter request: {id}");
                     responses.SendFrame(JsonSerializer.Serialize(reply));
                 }
                 if (photo is not null) events.SendFrame(JsonSerializer.Serialize(photo));
             }
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-        SmartShooterActionBridge? bridge = null;
+        FastCaptureController? controller = null;
         try
         {
             await ready.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
@@ -73,7 +75,8 @@ public sealed class SmartShooterBridgeTests
                 await fast.SelectTeamAsync(jobId, "A", token);
                 await scope.ServiceProvider.GetRequiredService<IActionCaptureService>().EnableAsync(jobId, DateTime.UtcNow.Ticks, token);
             }
-            bridge = new(provider.GetRequiredService<IServiceScopeFactory>(), jobId); bridge.Start(); bridge.VerifyCameras(false);
+            controller = new(provider.GetRequiredService<IServiceScopeFactory>()) { ActionMode = true };
+            await controller.VerifyActionCamerasAsync(jobId, false);
             ActionCaptureStatus? status = null;
             for (var n = 0; n < 600; n++)
             {
@@ -83,14 +86,14 @@ public sealed class SmartShooterBridgeTests
                 // Keep the production two-second uncertainty limit. If an
                 // overloaded CI host rejects a slow attempt, exercise the same
                 // explicit retry the operator uses rather than relaxing timing.
-                if (n is 200 or 400) bridge.VerifyCameras(false);
+                if (n is 200 or 400) await controller.VerifyActionCamerasAsync(jobId, false);
                 await Task.Delay(50, token);
             }
-            Assert.True(status!.Clocks.Count > 0, "SS clock verification failed: " + bridge.Status);
+            Assert.True(status!.Clocks.Count > 0, "SS clock verification failed: " + controller.ActionConnectionStatus);
             var sample = status.Clocks.OrderByDescending(c => c.FromUtcTicks).First();
             Assert.InRange(TimeSpan.FromTicks(sample.OffsetTicks).TotalDays, 399.999, 400.001);
             Assert.Equal("canon-r6ii-test", sample.CameraKey);
-            await bridge.StopAsync(); bridge = null;
+            await controller.DisposeAsync(); controller = null;
             using (var scope = provider.CreateScope())
             {
                 var fast = scope.ServiceProvider.GetRequiredService<IFastCaptureService>(); await fast.ScanAsync(jobId, token);
@@ -100,7 +103,7 @@ public sealed class SmartShooterBridgeTests
         }
         finally
         {
-            if (bridge is not null) await bridge.StopAsync();
+            if (controller is not null) await controller.DisposeAsync();
             serverStop.Cancel(); await server.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); Directory.Delete(root, true);
         }

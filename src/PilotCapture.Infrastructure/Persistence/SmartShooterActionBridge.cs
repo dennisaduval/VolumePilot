@@ -30,7 +30,12 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
     private long? _eventSequence;
     private bool _needsPhotoSync = true;
     public void Start() => _task = Task.Factory.StartNew(Run, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-    public void VerifyCameras(bool repeatWhenIdle) { SetRepeatChecks(repeatWhenIdle); _verify.Enqueue(true); }
+    public void VerifyCameras(bool repeatWhenIdle)
+    {
+        SetRepeatChecks(repeatWhenIdle);
+        Volatile.Write(ref _status, "Verification requested. Waiting for Smart Shooter and the camera.");
+        _verify.Enqueue(true);
+    }
     public void SetRepeatChecks(bool enabled) => Volatile.Write(ref _repeat, enabled);
     private T Service<T>(Func<IActionCaptureService, Task<T>> action)
     {
@@ -134,6 +139,7 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
         var nextSync = DateTime.MinValue; var nextPhotoSync = DateTime.MinValue;
         var lastVerification = DateTime.MinValue; var nextIdleCheck = DateTime.MinValue;
         var requestedVerification = false;
+        var connected = false;
         try
         {
             while (!_stop.IsCancellationRequested)
@@ -149,16 +155,18 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                         var full = _needsPhotoSync || now >= nextPhotoSync || stateBefore.Held.Any(p => p.Issue == "Waiting for SS metadata");
                         _needsPhotoSync = false;
                         if (!Request(full ? "Synchronise" : "GetCamera", full ? null : new() { ["CameraSelection"] = "All" }))
-                        { _needsPhotoSync = true; Volatile.Write(ref _status, "SS not responding. Enable External API: publisher 54543, requests 54544."); nextSync = now.AddSeconds(3); continue; }
+                        { connected = false; _needsPhotoSync = true; Volatile.Write(ref _status, "SS not responding. Enable External API: publisher 54543, requests 54544."); nextSync = now.AddSeconds(3); continue; }
                         if (full) nextPhotoSync = now.AddMinutes(5);
                         nextSync = now.AddSeconds(15);
                         var state = Service(s => s.GetStatusAsync(jobId, _stop.Token));
                         foreach (var camera in state.Cameras.Where(c => c.Status is "Ready" or "Busy"))
                             if (_seenCameras.Add(camera.CameraKey)) Service(s => s.InvalidateCameraAsync(jobId, camera.CameraKey, now.Ticks, _stop.Token));
-                        if (!requestedVerification && !_repeat) Volatile.Write(ref _status, "SS connected. Verify cameras before shooting; verification takes test photos.");
+                        if (!connected && !requestedVerification)
+                            Volatile.Write(ref _status, "SS connected. Verify cameras before shooting; verification takes test photos.");
+                        connected = true;
                     }
                     var repeatDue = false;
-                    if (now >= nextIdleCheck && Volatile.Read(ref _repeat) && now - lastVerification >= TimeSpan.FromSeconds(30))
+                    if (_tests.Count == 0 && now >= nextIdleCheck && Volatile.Read(ref _repeat) && now - lastVerification >= TimeSpan.FromSeconds(30))
                     {
                         var check = Service(s => s.GetStatusAsync(jobId, _stop.Token));
                         repeatDue = now - lastVerification >= TimeSpan.FromMinutes(15) || check.Cameras.Any(c => c.Status is "Ready" or "Busy" &&
@@ -169,29 +177,55 @@ public sealed class SmartShooterActionBridge(IServiceScopeFactory factory, strin
                         nextIdleCheck = now.AddSeconds(5);
                         var state = Service(s => s.GetStatusAsync(jobId, _stop.Token));
                         var online = state.Cameras.Where(c => c.Status is "Ready" or "Busy").ToArray();
-                        if (online.Length == 0) { Volatile.Write(ref _status, "No connected cameras reported by SS."); }
-                        else if (online.Any(c => c.Status != "Ready" || now.Ticks - c.LastPhotoUtcTicks < TimeSpan.FromSeconds(5).Ticks)
-                            || Service(s => KnownTransfersAsync(s)))
-                            Volatile.Write(ref _status, "Clock verification waiting for an idle camera/SS transfer queue.");
+                        if (_tests.Count > 0)
+                            Volatile.Write(ref _status, "Waiting for the current verification shot. Let it finish before retrying.");
+                        else if (online.Length == 0)
+                            Volatile.Write(ref _status, "Smart Shooter reports no connected camera ready to verify.");
+                        else if (online.Any(c => c.Status != "Ready"))
+                            Volatile.Write(ref _status, "Waiting for Smart Shooter to report all connected cameras ready.");
+                        else if (online.Any(c => now.Ticks - c.LastPhotoUtcTicks < TimeSpan.FromSeconds(5).Ticks))
+                            Volatile.Write(ref _status, "Waiting for five seconds without new camera photos. Stop shooting briefly.");
+                        else if (!requestedVerification && Service(s => KnownTransfersAsync(s)))
+                            Volatile.Write(ref _status, "Automatic clock check deferred: Smart Shooter lists photos on the camera.");
                         else
                         {
-                            // CheckClocks has no documented measurement response. Never infer
-                            // an offset from CameraDateTimeOffset (a sync parameter) or arrival lag.
-                            try { Request("CheckClocks"); }
-                            catch (IOException) { Volatile.Write(ref _status, "SS clock read unavailable; verifying from marked test exposures."); }
+                            // A card-resident photo is not necessarily a pending transfer.
+                            // An operator-requested check can proceed after the ready/quiet checks.
+                            requestedVerification = false;
+                            lastVerification = now;
                             foreach (var camera in online)
                             {
+                                var label = camera.Name.Length > 0 ? camera.Name : camera.CameraKey;
+                                Volatile.Write(ref _status, $"Sending verification shot to {label} through Smart Shooter.");
                                 var origin = ActionCaptureService.ClockOrigin + Ids.New();
                                 _tests[origin] = new(camera.CameraKey, DateTime.UtcNow.Ticks, Stopwatch.GetTimestamp());
-                                if (!Request("Shoot", new() { ["CameraSelection"] = "Single", ["CameraKey"] = camera.CameraKey, ["PhotoOrigin"] = origin }))
-                                { _tests.Remove(origin); Volatile.Write(ref _status, "SS clock test timed out; let transfers finish and verify again."); }
+                                try
+                                {
+                                    if (!Request("Shoot", new() { ["CameraSelection"] = "Single", ["CameraKey"] = camera.CameraKey, ["PhotoOrigin"] = origin }))
+                                    {
+                                        _tests.Remove(origin);
+                                        Volatile.Write(ref _status, $"Smart Shooter did not acknowledge the verification shot for {label}. Verify again when ready.");
+                                    }
+                                    else if (_tests.ContainsKey(origin))
+                                        Volatile.Write(ref _status, $"Smart Shooter accepted the shot for {label}. Waiting for its verification photo.");
+                                }
+                                catch (IOException ex)
+                                {
+                                    _tests.Remove(origin);
+                                    Volatile.Write(ref _status, ex.Message);
+                                }
                             }
-                            requestedVerification = false; lastVerification = now;
                         }
                     }
                     else if (now >= nextIdleCheck) nextIdleCheck = now.AddSeconds(5);
                     foreach (var key in _tests.Where(t => Stopwatch.GetElapsedTime(t.Value.Monotonic) > TimeSpan.FromSeconds(10)).Select(t => t.Key).ToArray())
-                    { _tests.Remove(key); Volatile.Write(ref _status, "Clock test capture time missing from SS and the original JPEG. Verify again when SS is idle."); }
+                    {
+                        var test = _tests[key];
+                        _tests.Remove(key);
+                        Volatile.Write(ref _status, test.PhotoKey is null
+                            ? "Smart Shooter did not report the marked verification photo. Check whether the camera fired and downloaded a JPEG."
+                            : "Clock test capture time missing from Smart Shooter and the original JPEG. Verify again when idle.");
+                    }
                     _stop.Token.WaitHandle.WaitOne(50);
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }

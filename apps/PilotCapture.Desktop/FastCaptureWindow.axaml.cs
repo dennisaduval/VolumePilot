@@ -378,7 +378,11 @@ public sealed partial class FastCaptureWindow : Window
     {
         if (_jobId is { } jobId) await _controller.ConnectActionAsync(jobId);
     });
-    private void OnVerifyActionClick(object? sender, RoutedEventArgs e) => _controller.VerifyActionCameras(RepeatActionClockChecks.IsChecked == true);
+    private async void OnVerifyActionClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (_jobId is { } jobId)
+            await _controller.VerifyActionCamerasAsync(jobId, RepeatActionClockChecks.IsChecked == true);
+    });
     private void OnRepeatActionClockChecksChanged(object? sender, RoutedEventArgs e) => _controller.SetRepeatActionClockChecks((sender as CheckBox)?.IsChecked == true);
     private async void OnReviewActionClick(object? sender, RoutedEventArgs e)
     {

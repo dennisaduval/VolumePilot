@@ -31,7 +31,11 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
         if (_actionBridge is not null) await _actionBridge.StopAsync();
         _actionBridge = new(factory, jobId, Wake); _actionBridge.Start();
     }
-    public void VerifyActionCameras(bool repeatWhenIdle) => _actionBridge?.VerifyCameras(repeatWhenIdle);
+    public async Task VerifyActionCamerasAsync(string jobId, bool repeatWhenIdle)
+    {
+        if (_actionBridge is null) await ConnectActionAsync(jobId);
+        _actionBridge?.VerifyCameras(repeatWhenIdle);
+    }
     public void SetRepeatActionClockChecks(bool enabled) => _actionBridge?.SetRepeatChecks(enabled);
     public async Task AssignActionPhotosAsync(string jobId, IReadOnlyList<string> ids, string teamId)
     {
