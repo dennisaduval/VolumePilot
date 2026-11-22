@@ -113,8 +113,13 @@ public sealed partial class FastCaptureWindow : Window
             StationName.Text = job.StationCode; StationName.IsEnabled = false;
             OutputLayoutNotice.IsVisible = job.OutputVersion < 2;
             if (_colors.Count == 0) _colors = await _controller.ExecuteAsync(s => s.GetColorsAsync());
-            PhotoColors.ItemsSource = _colors.Select(ColorRow).ToArray();
-            PhotoColors.SelectedIndex = _colors.ToList().FindIndex(c => c.Name == job.CurrentColor);
+            var colorSignature = job.Id + ":" + job.CurrentColor + ":" + string.Join("|", _colors.Select(c => c.Name));
+            if (PhotoColors.Tag as string != colorSignature)
+            {
+                PhotoColors.ItemsSource = _colors.Select(ColorRow).ToArray();
+                PhotoColors.SelectedIndex = _colors.ToList().FindIndex(c => c.Name == job.CurrentColor);
+                PhotoColors.Tag = colorSignature;
+            }
             PhotoColors.IsEnabled = job.OutputVersion >= 2;
             UpdateScheduleFilters();
             UpdatePerformanceChoices();

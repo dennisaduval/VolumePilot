@@ -173,7 +173,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual) throw new InvalidOperationException("This job does not use player slots.");
         var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
         var photos = await db.FastImages.Where(x => x.TeamId == team.Id && x.PlayerNumber == team.CurrentPlayer).ToListAsync(token);
-        if (photos.Count == 0 && team.CurrentPlayer > 0) return;
+        if (photos.Count == 0 && team.CurrentPlayer > 0 && job.OutputVersion < 2) return;
         await using var tx = await db.Database.BeginTransactionAsync(token);
         foreach (var photo in photos) { photo.Released = true; photo.NeedsDelivery = true; }
         var used = await db.FastImages.Where(x => x.TeamId == team.Id && x.PlayerNumber > 0).Select(x => x.PlayerNumber).Distinct().ToListAsync(token);

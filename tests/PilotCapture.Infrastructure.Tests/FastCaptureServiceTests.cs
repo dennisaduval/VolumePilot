@@ -459,6 +459,8 @@ public sealed class FastCaptureServiceTests
         await env.Service.SelectPlayerAsync(env.JobId, -14, env.Token);
         await env.Service.NextPlayerAsync(env.JobId, env.Token); // Empty staff slot still goes to next unused player.
         Assert.Equal(2, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Single().CurrentPlayer);
+        await env.Service.NextPlayerAsync(env.JobId, env.Token);
+        Assert.Equal(3, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Single().CurrentPlayer);
         await env.Service.AddPlayerSlotsAsync(env.JobId, env.Token);
         Assert.Equal(30, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Single().PlayerSlots);
         await env.Service.SelectPlayerAsync(env.JobId, 1, env.Token);

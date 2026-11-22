@@ -92,6 +92,9 @@ public sealed class MainWindowStartupTests
                         System.Text.Encoding.UTF8.GetBytes("TEAMNAME,ORDER\r\nFalcons,2\r\nBears,1\r\n"), 0, null, 1)));
                     var slotButtons = portraitFast.FindControl<WrapPanel>("PlayerSlots")!.Children.OfType<Button>().ToArray();
                     Assert.Equal(39, slotButtons.Length);
+                    Assert.Equal(16, portraitFast.FindControl<ComboBox>("PhotoColors")!.Items.Count);
+                    Assert.Contains(slotButtons, b => b.Tag is -1);
+                    Assert.Contains(slotButtons, b => b.Tag is -34);
                     Assert.Contains("Bears", portraitFast.FindControl<TextBlock>("PlayerTeamName")!.Text!);
                     Assert.True(portraitFast.FindControl<Button>("MonitorButton")!.IsEnabled);
                     Assert.DoesNotContain("calling thread", portraitFast.FindControl<TextBlock>("Status")!.Text ?? "", StringComparison.OrdinalIgnoreCase);
