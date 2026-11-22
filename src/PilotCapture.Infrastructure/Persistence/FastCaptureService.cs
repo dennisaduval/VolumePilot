@@ -10,6 +10,25 @@ namespace PilotCapture.Infrastructure.Persistence;
 
 public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoot) : IFastCaptureService
 {
+    public async Task<IReadOnlyList<string>> GetKnownActionSourceVersionsAsync(string jobId, IReadOnlyList<string>? paths = null, CancellationToken token = default)
+    {
+        var job = await db.FastJobs.AsNoTracking().SingleAsync(j => j.Id == jobId, token);
+        var keys = paths?.Select(ActionCaptureService.PathKey).ToArray();
+        var receipts = db.ActionReceipts.AsNoTracking().Where(r => r.JobId == jobId);
+        var legacy = db.FastImages.AsNoTracking().Where(r => r.JobId == jobId);
+        if (keys is not null)
+        {
+            receipts = receipts.Where(r => keys.Contains(r.PathKey));
+            legacy = legacy.Where(r => paths!.Contains(r.SourcePath));
+        }
+        var rows = await receipts.Select(r => new { r.SourcePath, r.SourceTicks, r.SourceLength }).ToListAsync(token);
+        var old = await legacy.Select(r => new { r.SourcePath, r.SourceTicks, r.SourceLength }).ToListAsync(token);
+        var result = rows.Concat(old).Select(r => $"{ActionCaptureService.PathKey(r.SourcePath)}|{r.SourceTicks}|{r.SourceLength}").ToList();
+        if (paths is null && job.IgnoredSourceVersionsJson is { } baseline)
+            result.AddRange(JsonSerializer.Deserialize<string[]>(baseline) ?? []);
+        return result;
+    }
+
     public async Task<IReadOnlyList<FastCaptureJob>> GetJobsAsync(CaptureJobType type, CancellationToken token = default) =>
         await db.FastJobs.AsNoTracking().Where(x => x.JobType == type).OrderByDescending(x => x.Id).ToListAsync(token);
 
@@ -26,7 +45,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         // Show every image of the selected player. Automatic modes keep their recent-team list.
         var ordered = imagesQuery.OrderByDescending(x => x.Sequence);
         var images = await (job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual ? ordered : ordered.Take(100)).ToListAsync(token);
-        var used = await db.FastImages.Where(x => x.TeamId == job.CurrentTeamId && x.PlayerNumber > 0)
+        var used = await db.FastImages.Where(x => x.TeamId == job.CurrentTeamId && x.PlayerNumber != 0)
             .Select(x => x.PlayerNumber).Distinct().OrderBy(x => x).ToListAsync(token);
         return new(job, teams, images, used);
     }
@@ -38,7 +57,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (string.IsNullOrWhiteSpace(settings.Name)) throw new ArgumentException("Enter a job name.");
         var source = Path.GetFullPath(settings.SourceFolder);
         var output = Path.GetFullPath(settings.OutputFolder);
-        var individual = settings.Type == CaptureJobType.PrintOnSiteTeamAndIndividual
+        var individual = settings.Type == CaptureJobType.PrintOnSiteTeamAndIndividual && settings.OutputVersion == 1
             ? Path.GetFullPath(settings.IndividualsFolder ?? throw new ArgumentException("Choose the individual images folder.")) : null;
         if (!Directory.Exists(source) || !Directory.Exists(output) || (individual is not null && !Directory.Exists(individual)))
             throw new DirectoryNotFoundException("Choose existing source and destination folders.");
@@ -49,8 +68,12 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
                 if (Inside(folders[i], folders[j]) || Inside(folders[j], folders[i]))
                     throw new ArgumentException("Source, team output, individual output and Rejects folders must be separate and cannot contain each other.");
         var job = new FastCaptureJob { Name = settings.Name.Trim(), JobType = settings.Type, SourceFolder = source,
-            OutputFolder = output, IndividualsFolder = individual, StartedAtTicks = DateTime.UtcNow.Ticks,
+            OutputFolder = output, IndividualsFolder = individual, OutputVersion = settings.OutputVersion,
+            StationCode = CaptureFileNames.Station(settings.StationCode ?? (await db.LocalInstallations.AsNoTracking().SingleAsync(token)).StationCode),
+            StartedAtTicks = DateTime.UtcNow.Ticks,
             IgnoredSourceVersionsJson = JsonSerializer.Serialize(Directory.EnumerateFiles(source).Where(IsJpeg).Select(x => new FileInfo(x)).Select(VersionKey).ToArray()) };
+        if (job.StationCode.Length is < 1 or > 12 || !job.StationCode.All(char.IsLetterOrDigit))
+            throw new ArgumentException("Use a short station number or name, such as 10. Give each capture PC a different station.");
         db.FastJobs.Add(job);
         await db.SaveChangesAsync(token);
         return job.Id;
@@ -87,6 +110,56 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         await db.SaveChangesAsync(token);
     }
 
+    public async Task AddPlayerSlotsAsync(string jobId, CancellationToken token = default)
+    {
+        var job = await db.FastJobs.SingleAsync(j => j.Id == jobId, token);
+        if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual) throw new InvalidOperationException("This job has no player slots.");
+        var team = await db.FastTeams.SingleAsync(t => t.Id == job.CurrentTeamId, token);
+        team.PlayerSlots = Math.Min(10000, Math.Max(25, team.PlayerSlots) + 5);
+        await db.SaveChangesAsync(token);
+    }
+
+    public async Task<IReadOnlyList<CaptureColor>> GetColorsAsync(CancellationToken token = default)
+    {
+        var installation = await db.LocalInstallations.AsNoTracking().SingleAsync(token);
+        return CaptureColor.Defaults.Concat(JsonSerializer.Deserialize<CaptureColor[]>(installation.CustomColorsJson) ?? []).ToArray();
+    }
+
+    public async Task AddColorAsync(CaptureColor color, CancellationToken token = default)
+    {
+        if (!CaptureColor.IsValid(color)) throw new ArgumentException("Enter a color name using letters and spaces, and a six-digit hex color.");
+        var colors = await GetColorsAsync(token);
+        if (colors.Any(c => c.Name.Replace(" ", "").Equals(color.Name.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("That color name already exists.");
+        var installation = await db.LocalInstallations.SingleAsync(token);
+        installation.CustomColorsJson = JsonSerializer.Serialize(colors.Skip(CaptureColor.Defaults.Count).Append(color));
+        await db.SaveChangesAsync(token);
+    }
+
+    public async Task SetColorAsync(string jobId, string color, CancellationToken token = default)
+    {
+        var colors = await GetColorsAsync(token);
+        if (!colors.Any(c => c.Name == color)) throw new ArgumentException("Choose an available color.");
+        var job = await db.FastJobs.SingleAsync(j => j.Id == jobId, token);
+        if (job.JobType == CaptureJobType.ActionPhotography || job.OutputVersion < 2) throw new InvalidOperationException("Start a new print job to use color filenames.");
+        // Attribute all settled incoming frames to the previous color first.
+        if (!await ScanAsync(jobId, token)) throw new IOException("A photo is still arriving. Wait before changing color.");
+        job.CurrentColor = color;
+        await db.SaveChangesAsync(token);
+    }
+
+    public async Task SetImageColorAsync(string imageId, string color, CancellationToken token = default)
+    {
+        if (!(await GetColorsAsync(token)).Any(c => c.Name == color)) throw new ArgumentException("Choose an available color.");
+        var image = await db.FastImages.SingleAsync(i => i.Id == imageId, token);
+        var job = await db.FastJobs.SingleAsync(j => j.Id == image.JobId, token);
+        if (job.JobType == CaptureJobType.ActionPhotography || job.OutputVersion < 2) throw new InvalidOperationException("This image uses the previous filename layout.");
+        image.ColorName = color;
+        image.NeedsDelivery = true;
+        await db.SaveChangesAsync(token);
+        await DeliverAsync(job, token);
+    }
+
     public async Task NextPlayerAsync(string jobId, CancellationToken token = default)
     {
         if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before Next Player.");
@@ -94,11 +167,13 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual) throw new InvalidOperationException("This job does not use player slots.");
         var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
         var photos = await db.FastImages.Where(x => x.TeamId == team.Id && x.PlayerNumber == team.CurrentPlayer).ToListAsync(token);
-        if (photos.Count == 0) return;
+        if (photos.Count == 0 && team.CurrentPlayer > 0) return;
         await using var tx = await db.Database.BeginTransactionAsync(token);
         foreach (var photo in photos) { photo.Released = true; photo.NeedsDelivery = true; }
         var used = await db.FastImages.Where(x => x.TeamId == team.Id && x.PlayerNumber > 0).Select(x => x.PlayerNumber).Distinct().ToListAsync(token);
-        do { team.CurrentPlayer++; } while (used.Contains(team.CurrentPlayer));
+        team.CurrentPlayer = team.CurrentPlayer < 0 ? 1 : team.CurrentPlayer + 1;
+        while (used.Contains(team.CurrentPlayer)) team.CurrentPlayer++;
+        team.PlayerSlots = Math.Max(team.PlayerSlots, team.CurrentPlayer);
         await db.SaveChangesAsync(token);
         await tx.CommitAsync(token);
         await DeliverAsync(job, token);
@@ -188,6 +263,11 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
             }
             catch (IOException) { settled = false; continue; }
             image.Sequence = ++sequence;
+            if (job.OutputVersion >= 2)
+            {
+                image.FileIdentity = await FileNameIdentity.GetAsync(db, image.Id, job.StationCode, token);
+                image.ColorName = job.CurrentColor;
+            }
             image.IsPrimary = job.JobType == CaptureJobType.PrintOnSiteTeamAndIndividual && !await db.FastImages.AnyAsync(x => x.TeamId == team.Id && x.PlayerNumber == team.CurrentPlayer && x.IsPrimary, token);
             db.FastImages.Add(image);
             try { await db.SaveChangesAsync(token); }
@@ -244,7 +324,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
 
     public async Task SelectPlayerAsync(string jobId, int player, CancellationToken token = default)
     {
-        if (player < 1 || player > 10000) throw new ArgumentOutOfRangeException(nameof(player));
+        if (!CaptureFileNames.ValidSlot(player)) throw new ArgumentOutOfRangeException(nameof(player));
         var job = await db.FastJobs.SingleAsync(x => x.Id == jobId, token);
         if (job.JobType != CaptureJobType.PrintOnSiteTeamAndIndividual) throw new InvalidOperationException("This job does not use player slots.");
         if (!await ScanAsync(jobId, token)) throw new IOException("An incoming photo is still being written. Wait before switching players.");
@@ -252,6 +332,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         if (team.CurrentPlayer == player) { await RepairPrimaryFilenameAsync(jobId, token); return; }
         await NextPlayerAsync(jobId, token);
         team.CurrentPlayer = player;
+        if (player > 0) team.PlayerSlots = Math.Max(team.PlayerSlots, player);
         await db.SaveChangesAsync(token);
         await RepairPrimaryFilenameAsync(jobId, token);
     }
@@ -263,6 +344,7 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         var team = await db.FastTeams.SingleAsync(x => x.Id == job.CurrentTeamId, token);
         var primary = await db.FastImages.SingleOrDefaultAsync(x => x.TeamId == team.Id && x.PlayerNumber == team.CurrentPlayer && x.IsPrimary && !x.IsRejected, token);
         if (primary is null) return;
+        if (job.OutputVersion >= 2) { await DeliverAsync(job, token); return; }
         if (!Directory.Exists(job.IndividualsFolder)) throw new IOException("Individual output is unavailable; primary filename repair remains pending.");
         // Repair only the selected player's individual copy. Do not alter release
         // state or republish the team copy while an operator is reviewing a player.
@@ -346,6 +428,19 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         foreach (var image in images)
         {
             var team = teams[image.TeamId];
+            if (job.OutputVersion >= 2)
+            {
+                if (image.FileIdentity.Length == 0) image.FileIdentity = await FileNameIdentity.GetAsync(db, image.Id, job.StationCode, token);
+                var color = image.ColorName == "None" ? "" : "_" + image.ColorName.Replace(" ", "");
+                var stemV2 = CaptureFileNames.Part(JobMediaService.SafeName(team.Name)) + "_" + image.FileIdentity +
+                    (image.PlayerNumber == 0 ? "" : "_" + CaptureFileNames.Slot(image.PlayerNumber)) +
+                    (image.IsPrimary && !image.IsRejected ? "_team" : "") + color;
+                var targetV2 = Path.Combine(image.IsRejected ? RejectRoot(job.OutputFolder) : job.OutputFolder, team.FolderName, stemV2 + ".jpg");
+                image.DeliveredPath = await ReconcileCopyAsync(image, image.DeliveredPath, targetV2, token);
+                image.NeedsDelivery = false;
+                await db.SaveChangesAsync(token);
+                continue;
+            }
             var stem = ImageStem(team, image);
             string? target;
             if (image.IsRejected) target = Path.Combine(RejectRoot(job.OutputFolder), team.FolderName, stem + ".jpg");
@@ -390,7 +485,9 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         // a watcher already consumed it, update the acknowledgement without reissuing it.
         if (target is not null && previous is not null &&
             string.Equals(Path.GetDirectoryName(target), Path.GetDirectoryName(previous), StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(WithoutPrimaryMarker(target), WithoutPrimaryMarker(previous), StringComparison.OrdinalIgnoreCase))
+            (string.Equals(WithoutPrimaryMarker(target), WithoutPrimaryMarker(previous), StringComparison.OrdinalIgnoreCase) ||
+                image.FileIdentity.Length > 0 && Path.GetFileName(target).Contains("_" + image.FileIdentity, StringComparison.OrdinalIgnoreCase) &&
+                Path.GetFileName(previous).Contains("_" + image.FileIdentity, StringComparison.OrdinalIgnoreCase)))
         {
             if (destinationRoot is not null && !Directory.Exists(destinationRoot))
                 throw new IOException($"Individual destination is unavailable; filename change remains pending: {destinationRoot}");
@@ -448,3 +545,4 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 }
+

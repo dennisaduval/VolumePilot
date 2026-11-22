@@ -68,6 +68,7 @@ public sealed class LocalInstallation
     // Created once at first run and retained for the lifetime of this local installation.
     public string InstallationId { get; private set; } = Ids.New();
     public string StationCode { get; set; } = "s10";
+    public string CustomColorsJson { get; set; } = "[]";
     public string? SmartShooterOutputPath { get; set; }
     public string? MasterMediaPath { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
@@ -130,6 +131,7 @@ public sealed class CaptureImage
     public ImageAsset? ImageAsset { get; set; }
     public CaptureImageReviewState ReviewState { get; set; } = CaptureImageReviewState.Pending;
     public string SelectionScopeId { get; set; } = string.Empty;
+    public bool SecondaryOptOut { get; set; }
     public bool IsSecondary { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsBanner { get; set; }
@@ -193,4 +195,5 @@ public sealed class AuditEntry
     public string? DetailsJson { get; set; }
     public DateTimeOffset OccurredAtUtc { get; set; }
 }
+
 

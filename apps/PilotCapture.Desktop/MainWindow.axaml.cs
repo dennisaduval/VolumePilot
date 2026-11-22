@@ -707,7 +707,7 @@ public sealed partial class MainWindow : Window
                 : string.Empty;
             ReviewStatus.Text = rows.Count == 0
                 ? "No images yet. Start monitoring in Capture, then photograph this subject."
-                : $"{rows.Count} image(s). Primary, Secondary and Banner are saved for this athlete and team; rejected images are retained.{dimensionWarning}";
+                : $"{rows.Count} image(s). Team, Secondary and Banner are saved for this athlete and team; rejected images are retained.{dimensionWarning}";
             UpdateReviewControls();
             if (selected is not null)
                 await ShowSelectedReviewImageAsync(selected);
@@ -739,7 +739,7 @@ public sealed partial class MainWindow : Window
                     ? $" · {width:N0} × {height:N0} px"
                     : " · dimensions unavailable")
                 + $" · {selected.ByteLength / (1024d * 1024d):N1} MB"
-                + (selected.IsPrimary ? " · Primary" : string.Empty)
+                + (selected.IsPrimary ? " · Team" : string.Empty)
                 + (selected.IsSecondary ? " · Secondary" : string.Empty)
                 + (selected.IsBanner ? " · Banner" : string.Empty)
                 + (selected.ReviewState == CaptureImageReviewState.Rejected ? " · Rejected" : string.Empty);
@@ -1461,4 +1461,5 @@ public sealed partial class MainWindow : Window
     }
 
 }
+
 

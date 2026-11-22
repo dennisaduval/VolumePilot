@@ -216,7 +216,7 @@
             </ListBox.ItemTemplate>
           </ListBox>
           <Grid x:Name="CaptureBottomActions" Grid.Row="3" ColumnDefinitions="*,*,*,*" ColumnSpacing="12">
-            <Button x:Name="SetPrimaryButton" Content="Primary" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnSetPrimaryClick" />
+            <Button x:Name="SetPrimaryButton" Content="Team" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnSetPrimaryClick" />
             <Button Grid.Column="1" x:Name="SetSecondaryButton" Content="Secondary" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnSetSecondaryClick" />
             <Button Grid.Column="2" x:Name="ToggleBannerButton" Content="Banner" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnToggleBannerClick" />
             <Button Grid.Column="3" x:Name="RejectImageButton" Content="Reject" HorizontalAlignment="Stretch" FontSize="20" IsEnabled="False" Click="OnRejectImageClick" />
@@ -229,3 +229,4 @@
     </TabControl>
   </Grid>
 </Window>
+

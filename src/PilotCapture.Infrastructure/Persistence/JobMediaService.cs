@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PilotCapture.Application;
 using PilotCapture.Application.Rosters;
+using PilotCapture.Application.FastCapture;
 using PilotCapture.Domain;
 
 namespace PilotCapture.Infrastructure.Persistence;
@@ -123,9 +124,27 @@ public sealed class JobMediaService(PilotCaptureDbContext db, IImageAssetStore s
                 var ext = kind == JobImageExportKind.EditedPng ? ".png" : ".jpg";
                 var team = fields.GetValueOrDefault("TEAMNAME", "");
                 if (string.IsNullOrWhiteSpace(team)) team = fields.GetValueOrDefault("CLASS", "");
-                var parts = new[] { fields["FIRSTNAME"], fields["LASTNAME"], team, fields["NUMBER"] }.Where(x => !string.IsNullOrWhiteSpace(x));
-                var stem = SafeName(string.Join("_", parts));
-                if (stem == "Unnamed") stem = SafeName(subject.DisplayName);
+                string Extra(params string[] aliases)
+                {
+                    if (member?.SourceDataJson is not { } data || !data.TrimStart().StartsWith('[')) return "";
+                    using var document = JsonDocument.Parse(data);
+                    foreach (var cell in document.RootElement.EnumerateArray())
+                    {
+                        var key = string.Concat((cell.GetProperty("Header").GetString() ?? "").Where(char.IsLetterOrDigit));
+                        if (aliases.Any(a => key.Equals(a, StringComparison.OrdinalIgnoreCase)))
+                            return cell.GetProperty("Value").GetString() ?? "";
+                    }
+                    return "";
+                }
+                var fullName = string.Join("_", new[] { fields["FIRSTNAME"], fields["LASTNAME"] }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                if (fullName.Length == 0) fullName = subject.DisplayName;
+                var identity = await FileNameIdentity.GetAsync(db, image.Id, set.CaptureSession!.StationCode, cancellationToken);
+                var parts = new[] { fullName, team, Extra("AgeGroup", "Age"), fields.GetValueOrDefault("CLASS"), fields["NUMBER"] }
+                    .Where(x => !string.IsNullOrWhiteSpace(x)).Select(CaptureFileNames.Part);
+                var baseStem = string.Join("_", parts);
+                if (baseStem.Length > 180) baseStem = baseStem[..180].TrimEnd('_');
+                var stem = baseStem + "_" + identity +
+                    (image.IsPrimary ? "_Team" : "") + (image.IsSecondary ? "_Secondary" : "") + (image.IsBanner ? "_Banner" : "");
                 var filename = kind == JobImageExportKind.BatchEditingOriginals ? asset.Id + ext : stem + ext;
                 var baseName = filename;
                 for (var n = 2; !names.Add(teamFolder + "/" + filename); n++) filename = Path.GetFileNameWithoutExtension(baseName) + "_" + n.ToString("00") + ext;
@@ -167,7 +186,7 @@ public sealed class JobMediaService(PilotCaptureDbContext db, IImageAssetStore s
     }
 
     private async Task<List<CaptureImage>> GetImagesAsync(string eventId, CancellationToken token) =>
-        await db.CaptureImages.Include(x => x.ImageAsset).Include(x => x.CaptureSet!).ThenInclude(x => x.Subject)
+        await db.CaptureImages.Include(x => x.CaptureSet!).ThenInclude(x => x.CaptureSession).Include(x => x.ImageAsset).Include(x => x.CaptureSet!).ThenInclude(x => x.Subject)
             .Include(x => x.CaptureSet!).ThenInclude(x => x.Membership!).ThenInclude(x => x.Group)
             .Where(x => x.CaptureSet!.CaptureSession!.EventId == eventId).OrderBy(x => x.Id).ToListAsync(token);
 
@@ -211,3 +230,4 @@ public sealed class JobMediaService(PilotCaptureDbContext db, IImageAssetStore s
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 }
+

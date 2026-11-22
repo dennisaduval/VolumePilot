@@ -197,7 +197,9 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
     {
         if (await db.FastImages.AnyAsync(i => i.Id == receipt.Id, token)) return;
         var sequence = (await db.FastImages.Where(i => i.TeamId == teamId).Select(i => (int?)i.Sequence).MaxAsync(token) ?? 0) + 1;
-        db.FastImages.Add(new() { Id = receipt.Id, JobId = receipt.JobId, TeamId = teamId, PlayerNumber = 0, Sequence = sequence,
+        var job = await db.FastJobs.SingleAsync(j => j.Id == receipt.JobId, token);
+        var identity = job.OutputVersion >= 2 ? await FileNameIdentity.GetAsync(db, receipt.Id, job.StationCode, token) : "";
+        db.FastImages.Add(new() { FileIdentity = identity, Id = receipt.Id, JobId = receipt.JobId, TeamId = teamId, PlayerNumber = 0, Sequence = sequence,
             SourcePath = receipt.SourcePath, SourceTicks = receipt.SourceTicks, SourceLength = receipt.SourceLength, StoredPath = receipt.StoredPath, Sha256 = receipt.Sha256 });
         receipt.TeamId = teamId; receipt.State = "Assigned"; receipt.Issue = "";
         await db.SaveChangesAsync(token);
@@ -279,3 +281,4 @@ public sealed class ActionCaptureService(PilotCaptureDbContext db, string mediaR
         return settled;
     }
 }
+

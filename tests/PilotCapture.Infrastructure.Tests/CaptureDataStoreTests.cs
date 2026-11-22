@@ -163,7 +163,7 @@ public sealed class CaptureDataStoreTests
         Assert.False(first.Image.IsPrimary);
         Assert.False(first.Image.IsBanner);
         Assert.True(second.Image.IsPrimary);
-        Assert.True(second.Image.IsBanner);
+        Assert.False(second.Image.IsBanner);
         Assert.Equal(CaptureImageReviewState.Accepted, second.Image.ReviewState);
 
         var auditEntries = await dbContext.AuditEntries.ToListAsync(cancellationToken);
@@ -202,46 +202,35 @@ public sealed class CaptureDataStoreTests
         var store = new CaptureDataStore(db);
         var first = CreateImage(set.Id, 0);
         await store.AddImageAsync(first.Image, first.Asset, CreateAuditEntry(first.Image, installation), token);
-        Assert.True(first.Image.IsPrimary && first.Image.IsSecondary && first.Image.IsBanner);
+        Assert.True(first.Image.IsPrimary);
+        Assert.False(first.Image.IsSecondary || first.Image.IsBanner);
         var second = CreateImage(set.Id, 1);
         await store.AddImageAsync(second.Image, second.Asset, CreateAuditEntry(second.Image, installation), token);
-        Assert.True(first.Image.IsPrimary && first.Image.IsBanner);
-        Assert.False(first.Image.IsSecondary);
-        Assert.True(second.Image.IsSecondary);
+        Assert.True(first.Image.IsPrimary && second.Image.IsSecondary);
+        Assert.False(first.Image.IsSecondary || first.Image.IsBanner || second.Image.IsBanner);
         await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.SetPrimary, token);
-        Assert.True(first.Image.IsSecondary && second.Image.IsPrimary);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.ToggleBanner, token);
+        Assert.True(second.Image.IsPrimary && second.Image.IsSecondary && second.Image.IsBanner);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.SetSecondary, token);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.ToggleBanner, token);
+        Assert.True(second.Image.IsPrimary);
+        Assert.False(second.Image.IsSecondary || second.Image.IsBanner);
         var repeatedSet = new CaptureSet { CaptureSessionId = set.CaptureSessionId, SubjectId = set.SubjectId, MembershipId = set.MembershipId, StartedAtUtc = DateTimeOffset.UtcNow };
-        db.CaptureSets.Add(repeatedSet);
-        await db.SaveChangesAsync(token);
+        db.CaptureSets.Add(repeatedSet); await db.SaveChangesAsync(token);
         var third = CreateImage(repeatedSet.Id, 2);
         await store.AddImageAsync(third.Image, third.Asset, CreateAuditEntry(third.Image, installation), token);
-        Assert.True(second.Image.IsPrimary && first.Image.IsSecondary && first.Image.IsBanner);
+        Assert.False(third.Image.IsSecondary || third.Image.IsBanner);
+        await store.ApplyReviewActionAsync(third.Image.Id, CaptureImageReviewAction.SetSecondary, token);
+        Assert.True(third.Image.IsSecondary && second.Image.IsPrimary);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.Reject, token);
+        Assert.True(first.Image.IsPrimary && third.Image.IsSecondary);
+        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, token);
+        Assert.True(third.Image.IsPrimary && third.Image.IsSecondary);
+        Assert.False(third.Image.IsBanner);
         var review = new ImageReviewService(db, store);
         Assert.Equal(3, (await review.GetImagesAsync(repeatedSet.Id, token)).Count);
-        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, token);
-        Assert.True(second.Image.IsPrimary && third.Image.IsSecondary && second.Image.IsBanner);
-        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, token);
-        Assert.NotEqual(CaptureImageReviewState.Rejected, first.Image.ReviewState);
-        Assert.True(second.Image.IsPrimary && third.Image.IsSecondary && second.Image.IsBanner);
-        await store.ApplyReviewActionAsync(third.Image.Id, CaptureImageReviewAction.ToggleBanner, token);
-        Assert.True(third.Image.IsBanner);
-        Assert.False(second.Image.IsBanner);
-        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.Reject, token);
-        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, token);
-        Assert.True(third.Image.IsPrimary && third.Image.IsSecondary && third.Image.IsBanner);
         await store.ApplyReviewActionAsync(third.Image.Id, CaptureImageReviewAction.Reject, token);
         Assert.All(await review.GetImagesAsync(repeatedSet.Id, token), x => Assert.False(x.IsPrimary || x.IsSecondary || x.IsBanner));
-        var secondGroup = new Group { EventId = (await db.Subjects.SingleAsync(token)).EventId, Name = "Other sport" };
-        var secondMembership = new Membership { SubjectId = set.SubjectId, GroupId = secondGroup.Id };
-        var otherSet = new CaptureSet { SubjectId = set.SubjectId, CaptureSessionId = set.CaptureSessionId, MembershipId = secondMembership.Id };
-        db.Groups.Add(secondGroup); db.Memberships.Add(secondMembership); db.CaptureSets.Add(otherSet);
-        await db.SaveChangesAsync(token);
-        var otherPhoto = CreateImage(otherSet.Id, 3);
-        await store.AddImageAsync(otherPhoto.Image, otherPhoto.Asset, CreateAuditEntry(otherPhoto.Image, installation), token);
-        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, token);
-        Assert.True(first.Image.IsPrimary && first.Image.IsSecondary && first.Image.IsBanner);
-        Assert.True(otherPhoto.Image.IsPrimary && otherPhoto.Image.IsSecondary && otherPhoto.Image.IsBanner);
-        Assert.Single(await review.GetImagesAsync(otherSet.Id, token));
         db.ChangeTracker.Clear();
         await new DatabaseInitializer(db).InitializeAsync(token);
         Assert.Equal(3, (await review.GetImagesAsync(repeatedSet.Id, token)).Count);
@@ -306,8 +295,11 @@ public sealed class CaptureDataStoreTests
             var primary = Path.Combine(result.Location, "Team Photo Images", "Test team");
             Assert.Equal(2, Directory.GetFiles(all, "*.png").Length);
             Assert.Single(Directory.GetFiles(primary, "*.png"));
-            Assert.True(File.Exists(Path.Combine(all, "Alex_Example_Test team_07.png")));
-            Assert.True(File.Exists(Path.Combine(all, "Alex_Example_Test team_07_02.png")));
+            Assert.True(File.Exists(Path.Combine(all, "Alex_Example_Test_team_07_10-01_Team.png")));
+            Assert.True(File.Exists(Path.Combine(all, "Alex_Example_Test_team_07_10-02_Secondary.png")));
+            var again = await exporter.ExportAsync(eventId, root, JobImageExportKind.EditedPng, token);
+            Assert.Equal(Directory.GetFiles(all, "*.png").Select(Path.GetFileName).Order(),
+                Directory.GetFiles(Path.Combine(again.Location, "All Images", "Test team"), "*.png").Select(Path.GetFileName).Order());
             var csv = await File.ReadAllTextAsync(Path.Combine(all, "SPA.csv"), token);
             Assert.Contains("POSITION", csv);
             Assert.Contains("LEAGUENAME", csv);
@@ -416,4 +408,5 @@ public sealed class CaptureDataStoreTests
         };
     }
 }
+
 

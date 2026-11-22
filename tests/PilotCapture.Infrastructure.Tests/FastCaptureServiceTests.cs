@@ -332,7 +332,7 @@ public sealed class FastCaptureServiceTests
         }
         await env.Db.SaveChangesAsync(env.Token);
         // Reconstruct the version-9 schema before exercising the real upgrade path.
-        await env.Db.Database.ExecuteSqlRawAsync("DELETE FROM schema_migrations WHERE version >= 10; DROP TABLE action_receipts; DROP TABLE action_photo_metadata; DROP TABLE action_clock_samples; DROP TABLE action_cameras; DROP TABLE action_changeovers; ALTER TABLE fast_capture_jobs DROP COLUMN action_timing_enabled; DROP INDEX ix_fast_pending_delivery; DROP INDEX ix_fast_action_progress; DROP INDEX ix_fast_capture_teams_schedule; ALTER TABLE fast_capture_teams DROP COLUMN day; ALTER TABLE fast_capture_teams DROP COLUMN hall;", env.Token);
+        await env.Db.Database.ExecuteSqlRawAsync("DROP TABLE capture_file_serials; ALTER TABLE fast_capture_jobs DROP COLUMN output_version; ALTER TABLE fast_capture_jobs DROP COLUMN station_code; ALTER TABLE fast_capture_jobs DROP COLUMN current_color; ALTER TABLE fast_capture_teams DROP COLUMN player_slots; ALTER TABLE fast_capture_images DROP COLUMN file_identity; ALTER TABLE fast_capture_images DROP COLUMN color_name; ALTER TABLE local_installation DROP COLUMN custom_colors_json; ALTER TABLE capture_images DROP COLUMN secondary_opt_out; DELETE FROM schema_migrations WHERE version >= 10; DROP TABLE action_receipts; DROP TABLE action_photo_metadata; DROP TABLE action_clock_samples; DROP TABLE action_cameras; DROP TABLE action_changeovers; ALTER TABLE fast_capture_jobs DROP COLUMN action_timing_enabled; DROP INDEX ix_fast_pending_delivery; DROP INDEX ix_fast_action_progress; DROP INDEX ix_fast_capture_teams_schedule; ALTER TABLE fast_capture_teams DROP COLUMN day; ALTER TABLE fast_capture_teams DROP COLUMN hall;", env.Token);
         await using var upgraded = new PilotCaptureDbContext(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(env.Connection).Options);
         await new DatabaseInitializer(upgraded).InitializeAsync(env.Token);
         var service = new FastCaptureService(upgraded, Path.Combine(env.Root, "media"));
@@ -425,6 +425,59 @@ public sealed class FastCaptureServiceTests
         Assert.Contains("Saturday_F_010_Rockets", snapshot.Teams.Single(t => t.Id == first.TeamId).FolderName);
     }
 
+    [Fact]
+    public async Task Single_team_folder_uses_compact_names_roles_colors_and_stable_station_serials()
+    {
+        await using var env = await Environment.CreateAsync(CaptureJobType.PrintOnSiteTeamAndIndividual, 2);
+        Assert.Equal(25, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Single().PlayerSlots);
+        await env.Service.SetColorAsync(env.JobId, "Red", env.Token);
+        await env.ShootAsync("p1.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var first = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single();
+        Assert.Equal("Falcons_10-01_P01_team_Red.jpg", Path.GetFileName(first.DeliveredPath));
+        Assert.Null(first.IndividualDeliveredPath);
+        await env.ShootAsync("p1-extra.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var extra = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single(x => x.Id != first.Id);
+        Assert.Equal("Falcons_10-02_P01_Red.jpg", Path.GetFileName(extra.DeliveredPath));
+        Assert.Equal(Path.GetDirectoryName(first.DeliveredPath), Path.GetDirectoryName(extra.DeliveredPath));
+        await env.Service.SetPrimaryAsync(extra.Id, env.Token);
+        var promoted = await env.Db.FastImages.AsNoTracking().SingleAsync(x => x.Id == extra.Id, env.Token);
+        Assert.Equal("Falcons_10-02_P01_team_Red.jpg", Path.GetFileName(promoted.DeliveredPath));
+        Assert.False(File.Exists(extra.DeliveredPath));
+        await env.Service.AddColorAsync(new CaptureColor("Deep Teal", "#008080"), env.Token);
+        await env.Service.SetImageColorAsync(extra.Id, "Deep Teal", env.Token);
+        promoted = await env.Db.FastImages.AsNoTracking().SingleAsync(x => x.Id == extra.Id, env.Token);
+        Assert.EndsWith("_team_DeepTeal.jpg", promoted.DeliveredPath!);
+        File.Delete(promoted.DeliveredPath!);
+        await env.Service.SetImageColorAsync(extra.Id, "Blue", env.Token);
+        promoted = await env.Db.FastImages.AsNoTracking().SingleAsync(x => x.Id == extra.Id, env.Token);
+        Assert.False(File.Exists(promoted.DeliveredPath));
+        await env.Service.SelectPlayerAsync(env.JobId, -1, env.Token);
+        await env.ShootAsync("coach.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        Assert.Contains("_HC01_team_", (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single().DeliveredPath!);
+        await env.Service.NextPlayerAsync(env.JobId, env.Token);
+        Assert.Equal(2, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Single().CurrentPlayer);
+        await env.Service.SelectPlayerAsync(env.JobId, -14, env.Token);
+        await env.Service.NextPlayerAsync(env.JobId, env.Token); // Empty staff slot still goes to next unused player.
+        Assert.Equal(2, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Single().CurrentPlayer);
+        await env.Service.AddPlayerSlotsAsync(env.JobId, env.Token);
+        Assert.Equal(30, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Teams.Single().PlayerSlots);
+        await env.Service.SelectPlayerAsync(env.JobId, 1, env.Token);
+        Assert.Equal(2, (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Count);
+        Assert.Empty(Directory.GetFiles(Path.Combine(env.Root, "individuals"), "*.jpg", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task Team_only_filename_omits_player_and_team_marker_and_color_none_is_optional()
+    {
+        await using var env = await Environment.CreateAsync(CaptureJobType.PrintOnSiteTeamsOnly, 2, "20");
+        await env.ShootAsync("camera.jpg"); await env.Service.ScanAsync(env.JobId, env.Token);
+        var image = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single();
+        Assert.Equal("Falcons_20-01.jpg", Path.GetFileName(image.DeliveredPath));
+        await env.Service.SetImageColorAsync(image.Id, "Dark Green", env.Token);
+        image = (await env.Service.GetSnapshotAsync(env.JobId, env.Token)).Images.Single();
+        Assert.Equal("Falcons_20-01_DarkGreen.jpg", Path.GetFileName(image.DeliveredPath));
+    }
+
     private sealed class Environment : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "vp-fast-" + Guid.NewGuid().ToString("N"));
@@ -433,14 +486,14 @@ public sealed class FastCaptureServiceTests
         public FastCaptureService Service { get; private set; } = null!;
         public string JobId { get; private set; } = "";
         public CancellationToken Token => TestContext.Current.CancellationToken;
-        public static async Task<Environment> CreateAsync(CaptureJobType type)
+        public static async Task<Environment> CreateAsync(CaptureJobType type, int outputVersion = 1, string station = "10")
         {
             var env = new Environment(); await env.Connection.OpenAsync(env.Token);
             env.Db = new(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(env.Connection).Options);
             await new DatabaseInitializer(env.Db).InitializeAsync(env.Token);
             foreach (var folder in new[] { "incoming", "teams", "individuals", "media" }) Directory.CreateDirectory(Path.Combine(env.Root, folder));
             env.Service = new(env.Db, Path.Combine(env.Root, "media"));
-            env.JobId = await env.Service.CreateJobAsync(new(type, "Fast test", Path.Combine(env.Root, "incoming"), Path.Combine(env.Root, "teams"), Path.Combine(env.Root, "individuals")), env.Token);
+            env.JobId = await env.Service.CreateJobAsync(new(type, "Fast test", Path.Combine(env.Root, "incoming"), Path.Combine(env.Root, "teams"), Path.Combine(env.Root, "individuals"), OutputVersion: outputVersion, StationCode: station), env.Token);
             await env.Service.SelectTeamAsync(env.JobId, "Falcons", env.Token);
             return env;
         }
@@ -448,3 +501,4 @@ public sealed class FastCaptureServiceTests
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await Connection.DisposeAsync(); Directory.Delete(Root, true); }
     }
 }
+

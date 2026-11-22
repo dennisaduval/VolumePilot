@@ -32,6 +32,7 @@ public sealed partial class FastCaptureWindow : Window
     private IReadOnlyList<FastCaptureTeam> _visibleTeams = [];
     private string? _scheduleSignature;
     private string? _actionProgressJob;
+    private IReadOnlyList<CaptureColor> _colors = [];
     private DateTime _nextActionRefresh;
     private long? _lastActionChangeoverTicks;
     private bool _actionClockVerified;
@@ -47,7 +48,11 @@ public sealed partial class FastCaptureWindow : Window
         PerformanceSuggestions.ItemTemplate = new FuncDataTemplate<FastCaptureTeam>((team, _) => new TextBlock
             { Text = team is null ? "" : FastPerformanceSearch.Label(team), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6), MinHeight = 44 });
         ModeTitle.Text = type switch { CaptureJobType.PrintOnSiteTeamsOnly => "Print on site · Team Only", CaptureJobType.ActionPhotography => "Action · automatic image routing", _ => "Print on site · Team and Individuals" };
-        PlayerPanel.IsVisible = PrimaryButton.IsVisible = IndividualsSetup.IsVisible = UsesPlayers;
+        PlayerPanel.IsVisible = PrimaryButton.IsVisible = UsesPlayers;
+        IndividualsSetup.IsVisible = false;
+        ColorPanel.IsVisible = type != CaptureJobType.ActionPhotography;
+        var machineStation = CaptureFileNames.Station(Environment.MachineName);
+        if (machineStation.Length > 0 && machineStation.All(char.IsDigit)) StationName.Text = machineStation;
         PreviewPanel.IsVisible = type != CaptureJobType.ActionPhotography;
         if (!UsesPlayers) { Grid.SetColumn(RejectButton, 0); Grid.SetColumnSpan(RejectButton, 2); }
         if (!UsesPlayers) { Grid.SetColumn(CaptureControls, 0); Grid.SetColumnSpan(CaptureControls, 2); }
@@ -105,15 +110,20 @@ public sealed partial class FastCaptureWindow : Window
             var job = _snapshot.Job;
             JobName.Text = job.Name; SourcePath.Text = job.SourceFolder; OutputPath.Text = job.OutputFolder; IndividualsPath.Text = job.IndividualsFolder;
             _settingChoices = true;
+            StationName.Text = job.StationCode; StationName.IsEnabled = false;
+            if (_colors.Count == 0) _colors = await _controller.ExecuteAsync(s => s.GetColorsAsync());
+            PhotoColors.ItemsSource = _colors.Select(ColorRow).ToArray();
+            PhotoColors.SelectedIndex = _colors.ToList().FindIndex(c => c.Name == job.CurrentColor);
+            PhotoColors.IsEnabled = job.OutputVersion >= 2;
             UpdateScheduleFilters();
             UpdatePerformanceChoices();
             _settingChoices = false;
             var team = _snapshot.Teams.FirstOrDefault(x => x.Id == job.CurrentTeamId);
             PlayerTeamName.Text = team?.Name ?? "Select a team";
-            CurrentPlayer.Text = team is null ? "" : $"Player {team.CurrentPlayer}";
+            CurrentPlayer.Text = team is null ? "" : CaptureFileNames.SlotLabel(team.CurrentPlayer);
             RenderPlayerSlots(team);
-            ImageListTitle.Text = UsesPlayers && team is not null ? $"Player {team.CurrentPlayer} images" : "Incoming images";
-            PhotoCount.Text = UsesPlayers && team is not null ? $"{_snapshot.Images.Count} image(s) · Player {team.CurrentPlayer}" : $"{_snapshot.Images.Count} recent image(s)";
+            ImageListTitle.Text = UsesPlayers && team is not null ? $"{CaptureFileNames.SlotLabel(team.CurrentPlayer)} images" : "Incoming images";
+            PhotoCount.Text = UsesPlayers && team is not null ? $"{_snapshot.Images.Count} image(s) · {CaptureFileNames.SlotLabel(team.CurrentPlayer)}" : $"{_snapshot.Images.Count} recent image(s)";
             if (_controller.ActionMode && (_actionProgressJob != job.Id || DateTime.UtcNow >= _nextActionRefresh))
             {
                 var action = await _controller.ActionAsync(s => s.GetStatusAsync(job.Id));
@@ -130,13 +140,13 @@ public sealed partial class FastCaptureWindow : Window
                     return $"{(camera.Name.Length > 0 ? camera.Name : camera.CameraKey)}: " + (clock is null ? "verification needed" : $"verified, correction {TimeSpan.FromTicks(clock.OffsetTicks).TotalSeconds:0.0}s") +
                         (camera.Issue.Length > 0 ? " (" + camera.Issue + ")" : "");
                 }));
-                ActionTransferStatus.Text = $"{action.Progress.Sum(p => p.Delivered)} delivered · {action.Progress.Sum(p => p.Pending)} pending · {action.HeldCount} held for review · {_controller.QueuedActionFiles} incoming files queued. Camera buffer total is unknown.\n" +
+                ActionTransferStatus.Text = $"{action.Progress.Sum(p => p.Delivered)} delivered · {action.Progress.Sum(p => p.Pending)} pending · {action.HeldCount} held for review · {_controller.QueuedActionFiles} files waiting to archive. Camera buffer total is unknown.\n" +
                     string.Join(" · ", action.Progress.Where(p => p.Pending > 0 || p.TeamId == job.CurrentTeamId).OrderBy(p => p.TeamId == job.CurrentTeamId ? 0 : 1).ThenByDescending(p => p.Pending).Take(8)
                         .Select(p => $"{p.Team}: {p.Delivered} delivered, {p.Pending} pending"));
             }
             if (_controller.ActionMode) UpdateActionChangeoverCue();
             var signature = job.CurrentTeamId + ":" + (UsesPlayers ? team?.CurrentPlayer : 0) + "|" +
-                string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}:{x.IndividualDeliveredPath}:{x.DeliveredPath}"));
+                string.Join('|', _snapshot.Images.Select(x => $"{x.Id}:{x.IsPrimary}:{x.IsRejected}:{x.Released}:{x.NeedsDelivery}:{x.IndividualDeliveredPath}:{x.DeliveredPath}:{x.ColorName}"));
             if (_displaySignature != signature)
             {
                 _displaySignature = signature;
@@ -172,6 +182,7 @@ public sealed partial class FastCaptureWindow : Window
     {
         MonitorButton.Content = _controller.IsRunning ? "Pause watching" : "Start watching";
         MonitorButton.IsEnabled = !_busy && _jobId is not null && _snapshot?.Job.CurrentTeamId is not null && (!_controller.ActionMode || _snapshot.Job.ActionTimingEnabled);
+        ApplyPhotoColor.IsEnabled = !_busy && SelectedImage() is not null && _snapshot?.Job.OutputVersion >= 2;
         NextPlayerButton.IsEnabled = !_busy && _snapshot?.Job.CurrentTeamId is not null;
         PrimaryButton.IsEnabled = !_busy && UsesPlayers && SelectedImage() is not null;
         RejectButton.IsEnabled = !_busy && !_reviewBusy && SelectedImage() is not null;
@@ -232,7 +243,7 @@ public sealed partial class FastCaptureWindow : Window
     public Task CreateConfiguredJobAsync() => RunAsync(async () =>
     {
         Dispatcher.UIThread.VerifyAccess();
-        var settings = new FastJobSettings(_type, JobName.Text ?? "", SourcePath.Text ?? "", OutputPath.Text ?? "", IndividualsPath.Text);
+        var settings = new FastJobSettings(_type, JobName.Text ?? "", SourcePath.Text ?? "", OutputPath.Text ?? "", IndividualsPath.Text, StationCode: StationName.Text);
         _jobId = await _controller.ExecuteAsync(s => s.CreateJobAsync(settings));
         SetupPanel.IsExpanded = false;
     });
@@ -248,7 +259,7 @@ public sealed partial class FastCaptureWindow : Window
     }
     private async void OnNewJobClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        await _controller.StopAsync(); await _controller.DisconnectActionAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true;
+        await _controller.StopAsync(); await _controller.DisconnectActionAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true; StationName.IsEnabled = true;
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
         Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
         CurrentPlayer.Text = PhotoCount.Text = ActivePerformance.Text = ActionChangeoverCue.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; ClearTeamSearch();
@@ -383,7 +394,7 @@ public sealed partial class FastCaptureWindow : Window
     }
     private static string ImageState(FastCaptureImage image) =>
         (image.PlayerNumber > 0 ? $"Player {image.PlayerNumber} · " : "") + $"{image.Sequence:0000} · " +
-        (image.IsRejected ? "REJECTED" : image.IsPrimary ? "PRIMARY" : "Accepted") + (image.NeedsDelivery ? " · pending" : "");
+        (image.IsRejected ? "REJECTED" : image.IsPrimary ? "TEAM" : "Accepted") + (image.ColorName == "None" ? "" : " · " + image.ColorName) + (image.NeedsDelivery ? " · pending" : "");
     private static Control ImageRow(FastCaptureImage image)
     {
         var row = new StackPanel { Spacing = 4, Margin = new Thickness(0, 6) };
@@ -463,22 +474,73 @@ public sealed partial class FastCaptureWindow : Window
     private void RenderPlayerSlots(FastCaptureTeam? team)
     {
         if (!UsesPlayers || _snapshot is null) return;
-        var signature = team?.Id + ":" + team?.CurrentPlayer + ":" + string.Join(',', _snapshot.UsedPlayers);
+        var signature = team?.Id + ":" + team?.CurrentPlayer + ":" + team?.PlayerSlots + ":" + string.Join(',', _snapshot.UsedPlayers);
         if (_slotSignature == signature) return;
         _slotSignature = signature; PlayerSlots.Children.Clear();
         if (team is null) return;
-        var maximum = Math.Max(40, Math.Max(team.CurrentPlayer, _snapshot.UsedPlayers.DefaultIfEmpty(0).Max()));
-        maximum = ((maximum + 9) / 10) * 10;
-        for (var n = 1; n <= maximum; n++)
+        var maximum = Math.Max(team.PlayerSlots, Math.Max(team.CurrentPlayer, _snapshot.UsedPlayers.Where(x => x > 0).DefaultIfEmpty(0).Max()));
+        var slots = Enumerable.Range(1, Math.Max(25, maximum)).Concat(new[] { -1, -11, -12, -13, -14, -21, -22, -23, -24, -31, -32, -33, -34 });
+        foreach (var n in slots)
         {
             var used = _snapshot.UsedPlayers.Contains(n); var current = team.CurrentPlayer == n;
-            var button = new Button { Tag = n, Content = $"{(used ? "✓ " : "")}Player {n}", Width = 84, MinHeight = 48,
+            var button = new Button { Tag = n, Content = new TextBlock { Text = $"{(used ? "✓ " : "")}{CaptureFileNames.SlotLabel(n)}", TextWrapping = TextWrapping.Wrap, FontSize = n < 0 ? 11 : 14 }, Width = 84, MinHeight = 48,
                 IsEnabled = true, FontWeight = current ? Avalonia.Media.FontWeight.Bold : Avalonia.Media.FontWeight.Normal };
             if (current) { button.Background = Avalonia.Media.Brushes.DarkBlue; button.Foreground = Avalonia.Media.Brushes.White; }
-            ToolTip.SetTip(button, used ? $"Reopen Player {n} to review or add photos" : $"Select Player {n}");
+            ToolTip.SetTip(button, used ? $"Reopen {CaptureFileNames.SlotLabel(n)}" : $"Select {CaptureFileNames.SlotLabel(n)}");
             button.Click += OnPlayerSlotClick; PlayerSlots.Children.Add(button);
         }
+        var add = new Button { Content = "+5 Players", Width = 84, MinHeight = 48 };
+        add.Click += async (_, _) =>
+        {
+            if (_jobId is { } jobId) await RunAsync(() => _controller.ExecuteAsync(s => s.AddPlayerSlotsAsync(jobId)));
+        };
+        PlayerSlots.Children.Add(add);
     }
+    private static ComboBoxItem ColorRow(CaptureColor color)
+    {
+        var content = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
+        content.Children.Add(new Border { Width = 24, Height = 24, Background = new SolidColorBrush(Color.Parse(color.Hex)),
+            BorderBrush = Brushes.Black, BorderThickness = new Thickness(1) });
+        content.Children.Add(new TextBlock { Text = color.Name, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+        return new ComboBoxItem { Content = content, Tag = color };
+    }
+
+    private async void OnPhotoColorChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_settingChoices || _jobId is not { } jobId || PhotoColors.SelectedItem is not ComboBoxItem { Tag: CaptureColor color }) return;
+        await RunAsync(() => _controller.ExecuteAsync(s => s.SetColorAsync(jobId, color.Name)));
+    }
+    private async void OnApplyPhotoColorClick(object? sender, RoutedEventArgs e)
+    {
+        if (SelectedImage() is not { } image || PhotoColors.SelectedItem is not ComboBoxItem { Tag: CaptureColor color }) return;
+        await RunAsync(() => _controller.ExecuteAsync(s => s.SetImageColorAsync(image.Id, color.Name)));
+    }
+    private async void OnAddColorClick(object? sender, RoutedEventArgs e)
+    {
+        var dialog = new Window { Title = "Add color", Width = 400, Height = 290, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var name = new TextBox { PlaceholderText = "Color name", MaxLength = 30 };
+        var hex = new TextBox { PlaceholderText = "Hex color, e.g. #800000", MaxLength = 7 };
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var save = new Button { Content = "Add color", MinHeight = 44 };
+        var panel = new StackPanel { Margin = new Thickness(20), Spacing = 12 };
+        panel.Children.Add(name); panel.Children.Add(hex); panel.Children.Add(status); panel.Children.Add(save);
+        save.Click += async (_, _) =>
+        {
+            save.IsEnabled = false;
+            try
+            {
+                var color = new CaptureColor(name.Text?.Trim() ?? "", "#" + (hex.Text?.Trim().TrimStart('#') ?? ""));
+                await _controller.ExecuteAsync(s => s.AddColorAsync(color));
+                _colors = []; dialog.Close();
+                await RefreshAfterActionAsync();
+            }
+            catch (Exception ex) { status.Text = ex.Message; }
+            finally { save.IsEnabled = true; }
+        };
+        dialog.Content = panel;
+        await dialog.ShowDialog(this);
+    }
+
     private async void OnPlayerSlotClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: int number } || _jobId is not { } jobId) return;
@@ -510,3 +572,4 @@ public sealed partial class FastCaptureWindow : Window
     }
 
 }
+

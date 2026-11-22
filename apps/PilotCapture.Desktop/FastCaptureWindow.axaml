@@ -13,6 +13,7 @@
       <StackPanel Spacing="8" Margin="0,8">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><ComboBox x:Name="SavedJobs" PlaceholderText="Resume a saved job" SelectionChanged="OnSavedJobChanged" /><Button Grid.Column="1" Content="New job" Click="OnNewJobClick" /></Grid>
         <TextBox x:Name="JobName" PlaceholderText="Job name" />
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10"><TextBlock Text="Station (unique on each PC)" VerticalAlignment="Center" /><TextBox x:Name="StationName" Text="10" MaxLength="12" /></Grid>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="SourcePath" IsReadOnly="True" PlaceholderText="Incoming Smart Shooter hot folder" /><Button Grid.Column="1" Content="Choose hot folder…" Click="OnSourceFolderClick" /></Grid>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="OutputPath" IsReadOnly="True" PlaceholderText="Watched team output folder" /><Button Grid.Column="1" Content="Choose team output…" Click="OnOutputFolderClick" /></Grid>
         <Grid x:Name="IndividualsSetup" ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBox x:Name="IndividualsPath" IsReadOnly="True" PlaceholderText="Separate individual images output folder" /><Button Grid.Column="1" Content="Choose individual output…" Click="OnIndividualsFolderClick" /></Grid>
@@ -53,6 +54,14 @@
       <Grid x:Name="CaptureControls" Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="10">
         <StackPanel Spacing="8">
           <TextBlock x:Name="ImageListTitle" Text="Incoming images" FontSize="20" FontWeight="SemiBold" />
+          <StackPanel x:Name="ColorPanel" Spacing="6" IsVisible="False">
+            <TextBlock Text="Color for new photos" FontSize="16" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <ComboBox x:Name="PhotoColors" SelectionChanged="OnPhotoColorChanged" FontSize="18" HorizontalAlignment="Stretch" />
+              <Button Grid.Column="1" Content="Add color…" Click="OnAddColorClick" />
+            </Grid>
+            <Button x:Name="ApplyPhotoColor" Content="Apply this color to selected photo" Click="OnApplyPhotoColorClick" />
+          </StackPanel>
           <StackPanel x:Name="ActionSetup" IsVisible="False" Spacing="6">
             <WrapPanel>
               <Button x:Name="ConnectActionButton" Content="Connect SS" Click="OnConnectActionClick" MinHeight="48" Margin="0,0,8,0" />
@@ -66,7 +75,7 @@
         </StackPanel>
         <ListBox Grid.Row="1" x:Name="ImagesList" SelectionChanged="OnImageChanged" HorizontalAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
         <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
-          <Button x:Name="PrimaryButton" Content="Primary" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnPrimaryClick" />
+          <Button x:Name="PrimaryButton" Content="Team" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnPrimaryClick" />
           <Button Grid.Column="1" x:Name="RejectButton" Content="Reject" MinHeight="64" FontSize="18" HorizontalAlignment="Stretch" Click="OnRejectClick" />
         </Grid>
       </Grid>
@@ -90,3 +99,4 @@
     <Border Grid.Row="4" Background="White" Padding="12"><TextBlock x:Name="Status" Text="Create or resume a job, select a team, then start watching." FontSize="17" TextWrapping="Wrap" /></Border>
   </Grid>
 </Window>
+

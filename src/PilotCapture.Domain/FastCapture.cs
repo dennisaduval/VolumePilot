@@ -11,6 +11,9 @@ public sealed class FastCaptureJob
     public string? CurrentTeamId { get; set; }
     public long StartedAtTicks { get; set; }
     public string? IgnoredSourceVersionsJson { get; set; }
+    public int OutputVersion { get; set; } = 1;
+    public string StationCode { get; set; } = "10";
+    public string CurrentColor { get; set; } = "None";
     public bool ActionTimingEnabled { get; set; }
 }
 public sealed class FastCaptureTeam
@@ -19,6 +22,7 @@ public sealed class FastCaptureTeam
     public string JobId { get; set; } = "";
     public string Name { get; set; } = "";
     public string FolderName { get; set; } = "";
+    public int PlayerSlots { get; set; } = 25;
     public int CurrentPlayer { get; set; } = 1;
     public int SortOrder { get; set; }
     public string PerformanceKey { get; set; } = "";
@@ -39,6 +43,8 @@ public sealed class FastCaptureImage
     public long SourceLength { get; set; }
     public string StoredPath { get; set; } = "";
     public string Sha256 { get; set; } = "";
+    public string FileIdentity { get; set; } = "";
+    public string ColorName { get; set; } = "None";
     public bool IsPrimary { get; set; }
     public bool IsRejected { get; set; }
     public bool Released { get; set; }
@@ -56,3 +62,4 @@ public sealed class FastCaptureRosterImport
     public string SourceDataJson { get; set; } = "";
     public string MappingJson { get; set; } = "";
 }
+

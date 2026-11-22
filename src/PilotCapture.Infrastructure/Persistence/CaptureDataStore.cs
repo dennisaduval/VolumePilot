@@ -14,6 +14,11 @@ public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICapture
         var images = await dbContext.CaptureImages.Where(x => x.SelectionScopeId == image.SelectionScopeId)
             .OrderBy(x => x.Id).ToListAsync(cancellationToken);
         images = images.OrderBy(x => x.CapturedAtUtc).ThenBy(x => x.Id).ToList();
+        image.SecondaryOptOut = images.Any(x => x.SecondaryOptOut);
+        // Auto-select the second eligible image once; preserve intentional choices on revisits.
+        if (!image.SecondaryOptOut && !images.Any(x => x.IsSecondary) &&
+            images.Count(x => x.ReviewState != CaptureImageReviewState.Rejected) == 1)
+            image.IsSecondary = true;
         images.Add(image);
         var roles = NormalizeRoles(images);
         // Clear first, then assign: SQLite unique indexes are checked per statement.
@@ -45,19 +50,21 @@ public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICapture
             case CaptureImageReviewAction.SetPrimary:
                 image.ReviewState = CaptureImageReviewState.Accepted;
                 foreach (var x in images) x.IsPrimary = x == image;
-                if (secondary == image && primary != image)
-                    foreach (var x in images) x.IsSecondary = x == primary;
                 break;
             case CaptureImageReviewAction.SetSecondary:
                 image.ReviewState = CaptureImageReviewState.Accepted;
-                foreach (var x in images) x.IsSecondary = x == image;
-                if (primary == image && secondary != image)
-                    foreach (var x in images) x.IsPrimary = x == secondary;
+                var removeSecondary = secondary == image;
+                foreach (var x in images)
+                {
+                    x.IsSecondary = !removeSecondary && x == image;
+                    x.SecondaryOptOut = removeSecondary;
+                }
                 break;
             case CaptureImageReviewAction.ToggleBanner:
-                // Legacy API name retained; the banner button now selects exactly one banner.
+                // Toggle off the selected banner; selecting another overrides the old one.
                 image.ReviewState = CaptureImageReviewState.Accepted;
-                foreach (var x in images) x.IsBanner = x == image;
+                var removeBanner = image.IsBanner;
+                foreach (var x in images) x.IsBanner = !removeBanner && x == image;
                 break;
         }
         var roles = NormalizeRoles(images);
@@ -69,9 +76,8 @@ public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICapture
     {
         var eligible = images.Where(x => x.ReviewState != CaptureImageReviewState.Rejected).ToList();
         var primary = eligible.FirstOrDefault(x => x.IsPrimary) ?? eligible.FirstOrDefault();
-        var secondary = eligible.FirstOrDefault(x => x.IsSecondary && x != primary)
-            ?? eligible.FirstOrDefault(x => x != primary) ?? primary;
-        var banner = eligible.FirstOrDefault(x => x.IsBanner) ?? primary;
+        var secondary = eligible.FirstOrDefault(x => x.IsSecondary);
+        var banner = eligible.FirstOrDefault(x => x.IsBanner);
         return (primary, secondary, banner);
     }
 
@@ -92,3 +98,4 @@ public sealed class CaptureDataStore(PilotCaptureDbContext dbContext) : ICapture
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
+

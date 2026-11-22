@@ -122,3 +122,20 @@ class FastCaptureMigrationTests(unittest.TestCase):
         self.assertEqual([(1,), (0,), (0,)], db.execute('SELECT needs_delivery FROM fast_capture_images ORDER BY id').fetchall())
         self.assertEqual([('team.jpg','individual.jpg')]*3, db.execute('SELECT delivered_path,individual_delivered_path FROM fast_capture_images').fetchall())
         db.close()
+
+
+class FieldOutputMigrationTests(unittest.TestCase):
+    def test_upgrade_retains_legacy_jobs_and_new_serials_are_durable(self):
+        db = sqlite3.connect(':memory:')
+        for path in sorted(MIGRATIONS.glob('*.sql')):
+            if path.name < '0013':
+                db.executescript(path.read_text())
+        db.execute("INSERT INTO fast_capture_jobs(id,name,job_type,source_folder,output_folder,started_at_ticks) VALUES('job','Old',2,'in','out',1)")
+        db.executescript((MIGRATIONS / '0013_field_output.sql').read_text())
+        self.assertEqual((1, '10', 'None'), db.execute("SELECT output_version,station_code,current_color FROM fast_capture_jobs").fetchone())
+        db.execute("INSERT INTO capture_file_serials(image_key,station) VALUES('a','10')")
+        db.execute("INSERT INTO capture_file_serials(image_key,station) VALUES('b','20')")
+        self.assertEqual([(1, '10'), (2, '20')], db.execute("SELECT serial,station FROM capture_file_serials ORDER BY serial").fetchall())
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO capture_file_serials(image_key,station) VALUES('a','30')")
+        db.close()

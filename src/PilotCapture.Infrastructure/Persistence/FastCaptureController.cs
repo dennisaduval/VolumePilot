@@ -14,7 +14,28 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
     private FileSystemWatcher? _watcher;
     private readonly ConcurrentDictionary<string, byte> _actionIncoming = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<string> _actionQueue = new();
-    private void QueueActionPath(string path) { if (_actionIncoming.TryAdd(path, 0)) _actionQueue.Enqueue(path); }
+    private readonly ConcurrentDictionary<string, byte> _knownActionVersions = new(StringComparer.OrdinalIgnoreCase);
+    private static string SourceVersion(string path)
+    {
+        var info = new FileInfo(path);
+        return $"{Path.GetFullPath(path).ToUpperInvariant()}|{info.LastWriteTimeUtc.Ticks}|{info.Length}";
+    }
+    private void QueueActionPath(string path)
+    {
+        if (!Path.GetExtension(path).Equals(".jpg", StringComparison.OrdinalIgnoreCase) &&
+            !Path.GetExtension(path).Equals(".jpeg", StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            if (!File.Exists(path) || _knownActionVersions.ContainsKey(SourceVersion(path))) return;
+            if (_actionIncoming.TryAdd(path, 0)) _actionQueue.Enqueue(path);
+        }
+        catch (IOException) { } // A rename/write race is recovered by the next folder pass.
+    }
+    public void RecoverActionIncoming(string folder)
+    {
+        foreach (var path in Directory.EnumerateFiles(folder)) QueueActionPath(path);
+        Wake();
+    }
     private SmartShooterActionBridge? _actionBridge;
     public bool ActionMode { get; set; }
     public int QueuedActionFiles => _actionIncoming.Count;
@@ -72,6 +93,10 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
     public async Task StartAsync(string jobId, string folder)
     {
         await StopAsync();
+        _knownActionVersions.Clear();
+        if (ActionMode)
+            foreach (var version in await ExecuteAsync(s => s.GetKnownActionSourceVersionsAsync(jobId)))
+                _knownActionVersions.TryAdd(version, 0);
         _stop = new CancellationTokenSource();
         _watcher = new FileSystemWatcher(folder) { NotifyFilter = NotifyFilters.FileName | NotifyFilters.Size | NotifyFilters.LastWrite, EnableRaisingEvents = true };
         void Arrived(string path) { if (ActionMode) QueueActionPath(path); Wake(); }
@@ -92,16 +117,27 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
                     // One intake worker; Action UI commands use independent short DB scopes.
                     if (ActionMode && DateTime.UtcNow >= recovery)
                     {
-                        foreach (var path in Directory.EnumerateFiles(folder)) QueueActionPath(path);
+                        RecoverActionIncoming(folder);
                         recovery = DateTime.UtcNow.AddMinutes(1);
                     }
                     var batch = new List<string>();
-                    if (ActionMode) while (batch.Count < 8 && _actionQueue.TryDequeue(out var path)) { _actionIncoming.TryRemove(path, out _); batch.Add(path); }
+                    if (ActionMode) while (batch.Count < 8 && _actionQueue.TryDequeue(out var path)) { batch.Add(path); }
                     paths = ActionMode ? batch.ToArray() : null;
                     if (ActionMode) await _actionFiles.WaitAsync(token);
-                    try { settled = await ExecuteAsync(s => s.ScanAsync(jobId, token, paths)); }
+                    try
+                    {
+                        settled = await ExecuteAsync(s => s.ScanAsync(jobId, token, paths));
+                        if (ActionMode && paths is not null)
+                            foreach (var version in await ExecuteAsync(s => s.GetKnownActionSourceVersionsAsync(jobId, paths, token)))
+                                _knownActionVersions.TryAdd(version, 0);
+                    }
                     finally { if (ActionMode) _actionFiles.Release(); }
-                    if (!settled && paths is not null) foreach (var path in paths) QueueActionPath(path);
+                    if (paths is not null)
+                        foreach (var path in paths)
+                        {
+                            _actionIncoming.TryRemove(path, out _);
+                            QueueActionPath(path); // Only genuinely unarchived versions return to the intake queue.
+                        }
                     if (!_actionIncoming.IsEmpty) settled = false;
                     Error = settled ? null : "Processing incoming JPEGs.";
                 }
@@ -109,7 +145,7 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
                 catch (Exception exception)
                 {
                     Error = exception.Message;
-                    if (paths is not null) foreach (var path in paths) QueueActionPath(path);
+                    if (paths is not null) foreach (var path in paths) { _actionIncoming.TryRemove(path, out _); QueueActionPath(path); }
                 }
                 try { await _wake.WaitAsync(TimeSpan.FromMilliseconds(settled ? 2000 : 200), token); }
                 catch (OperationCanceledException) { break; }
@@ -127,3 +163,4 @@ public sealed class FastCaptureController(IServiceScopeFactory factory) : IAsync
     public void Dispose() { _stop?.Cancel(); _watcher?.Dispose(); _actionBridge?.Dispose(); }
     public async ValueTask DisposeAsync() { await StopAsync(); await DisconnectActionAsync(); _gate.Dispose(); _actionFiles.Dispose(); _wake.Dispose(); }
 }
+

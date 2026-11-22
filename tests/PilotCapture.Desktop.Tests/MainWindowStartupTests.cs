@@ -81,10 +81,17 @@ public sealed class MainWindowStartupTests
                     {
                         jobId = (await service.GetJobsAsync(PilotCapture.Domain.CaptureJobType.PrintOnSiteTeamAndIndividual)).Single().Id;
                     }));
+                    // Preserve the existing legacy delivery/repair checks; new layout
+                    // is exercised in FastCaptureServiceTests.
+                    using (var legacyScope = provider.CreateScope())
+                    {
+                        var legacyDb = legacyScope.ServiceProvider.GetRequiredService<PilotCaptureDbContext>();
+                        Complete(legacyDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE fast_capture_jobs SET output_version=1, individuals_folder={individuals} WHERE id={jobId}"));
+                    }
                     Complete(portraitFast.ImportConfiguredRosterAsync(new(jobId, "schedule.csv",
                         System.Text.Encoding.UTF8.GetBytes("TEAMNAME,ORDER\r\nFalcons,2\r\nBears,1\r\n"), 0, null, 1)));
                     var slotButtons = portraitFast.FindControl<WrapPanel>("PlayerSlots")!.Children.OfType<Button>().ToArray();
-                    Assert.Equal(40, slotButtons.Length);
+                    Assert.Equal(39, slotButtons.Length);
                     Assert.Contains("Bears", portraitFast.FindControl<TextBlock>("PlayerTeamName")!.Text!);
                     Assert.True(portraitFast.FindControl<Button>("MonitorButton")!.IsEnabled);
                     Assert.DoesNotContain("calling thread", portraitFast.FindControl<TextBlock>("Status")!.Text ?? "", StringComparison.OrdinalIgnoreCase);
@@ -100,7 +107,7 @@ public sealed class MainWindowStartupTests
                     var closeup = portraitFast.FindControl<PortraitCropView>("Closeup")!;
                     Assert.True(fullPreview.Source is not null, $"Print preview missing. Status: {portraitFast.FindControl<TextBlock>("Status")!.Text}; items: {portraitFast.FindControl<ListBox>("ImagesList")!.Items.Count}; selection: {portraitFast.FindControl<ListBox>("ImagesList")!.SelectedIndex}");
                     Assert.Same(fullPreview.Source, closeup.Source);
-                    Assert.Contains("PRIMARY", portraitFast.FindControl<TextBlock>("PreviewImageStatus")!.Text!);
+                    Assert.Contains("TEAM", portraitFast.FindControl<TextBlock>("PreviewImageStatus")!.Text!);
                     var imageList = portraitFast.FindControl<ListBox>("ImagesList")!;
                     var previewPhoto = imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>().Single();
                     var imageRow = Assert.IsType<StackPanel>(imageList.ItemTemplate!.Build(previewPhoto));
@@ -112,7 +119,7 @@ public sealed class MainWindowStartupTests
                     Assert.True(File.Exists(previewPhoto.IndividualDeliveredPath));
                     Assert.Contains(new string('x', 70), cameraLabel.Text!);
                     Assert.Equal(Avalonia.Media.TextWrapping.Wrap, fileLabel.TextWrapping);
-                    Assert.Contains("PRIMARY", stateLabel.Text!); Assert.True(fileLabel.Bounds.Width <= 280);
+                    Assert.Contains("TEAM", stateLabel.Text!); Assert.True(fileLabel.Bounds.Width <= 280);
                     // Reproduce an older bare copy while role/rejection/pending flags
                     // stay unchanged. Pressing Primary must repair disk AND refresh its name.
                     var markedOutput = previewPhoto.IndividualDeliveredPath!;
@@ -151,7 +158,7 @@ public sealed class MainWindowStartupTests
                     PumpUntil(() => portraitFast.FindControl<TextBlock>("CurrentPlayer")!.Text == "Player 2" && imageList.Items.Count == 0);
                     Assert.Null(fullPreview.Source); Assert.Null(closeup.Source);
                     var usedPlayer = portraitFast.FindControl<WrapPanel>("PlayerSlots")!.Children.OfType<Button>().Single(b => b.Tag is 1);
-                    Assert.True(usedPlayer.IsEnabled); Assert.Contains("✓", usedPlayer.Content!.ToString()!);
+                    Assert.True(usedPlayer.IsEnabled); Assert.Contains("✓", Assert.IsType<TextBlock>(usedPlayer.Content).Text!);
                     usedPlayer.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
                     PumpUntil(() => portraitFast.FindControl<TextBlock>("CurrentPlayer")!.Text == "Player 1" && imageList.Items.Count == 2 && fullPreview.Source is not null);
                     Assert.All(imageList.ItemsSource!.Cast<PilotCapture.Domain.FastCaptureImage>(), p => Assert.Equal(1, p.PlayerNumber));
@@ -391,4 +398,5 @@ public sealed class MainWindowStartupTests
     }
 
 }
+
 

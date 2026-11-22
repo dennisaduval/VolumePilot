@@ -23,7 +23,7 @@ public sealed class CaptureImageReviewRow(CaptureImageReviewItem item, Bitmap th
         get
         {
             var flags = new List<string>();
-            if (IsPrimary) flags.Add("Primary");
+            if (IsPrimary) flags.Add("Team");
             if (IsSecondary) flags.Add("Secondary");
             if (IsBanner) flags.Add("Banner");
             if (ReviewState == CaptureImageReviewState.Rejected) flags.Add("Rejected");
@@ -32,4 +32,5 @@ public sealed class CaptureImageReviewRow(CaptureImageReviewItem item, Bitmap th
         }
     }
 }
+
 
