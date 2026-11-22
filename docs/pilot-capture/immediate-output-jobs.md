@@ -1,5 +1,8 @@
 # Immediate-output capture jobs
 
+Current filename, pose and output rules: [November field update](field-output-november-2026.md). Earlier split-folder and automatic-banner rules below are superseded.
+
+
 For Action bursts and delayed transfers, [buffered Action capture](action-buffered-capture.md) supersedes the earlier drain-before-switch rule when SS timing is enabled. Print modes retain their existing boundary behavior.
 
 The current [performance schedule import](schedule-import.md) adds day/hall selection, per-schedule navigation, optional Entry Type mapping and values-only choice labels. It extends and supersedes the earlier unscoped schedule presentation below.
@@ -154,3 +157,4 @@ Opening/resuming a print job, selecting a player/performance, or pressing Primar
 The closeup's actual drawing rectangle and sampled crop now use **4:5 portrait** at every viewport size, with centered letterboxing when needed. It remains a display-only crop of the shared decoded portrait.
 
 Acceptance: open an older player and inspect the actual individual output folder for `_Primary.jpg`; compare the filename shown on screen with that file and the separately labeled camera source. Check both a new primary and an existing bare copy, and verify a consumed team/individual copy is not recreated by repair. Confirm the closeup is 4:5 at normal and minimum window sizes.
+

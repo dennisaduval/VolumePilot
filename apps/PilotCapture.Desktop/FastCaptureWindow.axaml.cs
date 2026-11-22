@@ -111,6 +111,7 @@ public sealed partial class FastCaptureWindow : Window
             JobName.Text = job.Name; SourcePath.Text = job.SourceFolder; OutputPath.Text = job.OutputFolder; IndividualsPath.Text = job.IndividualsFolder;
             _settingChoices = true;
             StationName.Text = job.StationCode; StationName.IsEnabled = false;
+            OutputLayoutNotice.IsVisible = job.OutputVersion < 2;
             if (_colors.Count == 0) _colors = await _controller.ExecuteAsync(s => s.GetColorsAsync());
             PhotoColors.ItemsSource = _colors.Select(ColorRow).ToArray();
             PhotoColors.SelectedIndex = _colors.ToList().FindIndex(c => c.Name == job.CurrentColor);
@@ -259,7 +260,7 @@ public sealed partial class FastCaptureWindow : Window
     }
     private async void OnNewJobClick(object? sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        await _controller.StopAsync(); await _controller.DisconnectActionAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true; StationName.IsEnabled = true;
+        await _controller.StopAsync(); await _controller.DisconnectActionAsync(); _jobId = null; _snapshot = null; _displaySignature = null; JobName.Text = ""; SetupPanel.IsExpanded = true; StationName.IsEnabled = true; OutputLayoutNotice.IsVisible = false;
         _settingChoices = true; Teams.ItemsSource = null; ImagesList.ItemsSource = null; _settingChoices = false;
         Interlocked.Increment(ref _previewRequest); Preview.Source = null; Closeup.Source = null; _bitmap?.Dispose(); _bitmap = null; _displayedImageId = null;
         CurrentPlayer.Text = PhotoCount.Text = ActivePerformance.Text = ActionChangeoverCue.Text = ""; PlayerSlots.Children.Clear(); _slotSignature = null; ClearTeamSearch();

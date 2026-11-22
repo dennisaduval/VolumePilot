@@ -24,8 +24,14 @@ public sealed class FastCaptureService(PilotCaptureDbContext db, string mediaRoo
         var rows = await receipts.Select(r => new { r.SourcePath, r.SourceTicks, r.SourceLength }).ToListAsync(token);
         var old = await legacy.Select(r => new { r.SourcePath, r.SourceTicks, r.SourceLength }).ToListAsync(token);
         var result = rows.Concat(old).Select(r => $"{ActionCaptureService.PathKey(r.SourcePath)}|{r.SourceTicks}|{r.SourceLength}").ToList();
-        if (paths is null && job.IgnoredSourceVersionsJson is { } baseline)
-            result.AddRange(JsonSerializer.Deserialize<string[]>(baseline) ?? []);
+        if (paths is null)
+        {
+            if (job.IgnoredSourceVersionsJson is { } baseline)
+                result.AddRange(JsonSerializer.Deserialize<string[]>(baseline) ?? []);
+            else
+                result.AddRange(Directory.EnumerateFiles(job.SourceFolder).Where(IsJpeg).Select(p => new FileInfo(p))
+                    .Where(f => f.LastWriteTimeUtc.Ticks < job.StartedAtTicks).Select(VersionKey));
+        }
         return result;
     }
 

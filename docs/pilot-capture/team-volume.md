@@ -1,5 +1,8 @@
 # Team Volume
 
+Current filename, pose and output rules: [November field update](field-output-november-2026.md). Earlier split-folder and automatic-banner rules below are superseded.
+
+
 Choose **Team Volume** on the job screen for rostered portrait jobs that will be
 processed later. This uses the local portrait workspace, including the image
 review, selection roles, originals and job export workflow. It has no print
@@ -41,3 +44,4 @@ Pilot Capture data**. Read the warning and type **DELETE LOCAL DATA**. This
 deletes every local job, roster, assignment, setting and stored photo copy in
 the Pilot Capture data folder. The app closes; reopen it to start fresh.
 Files in external Smart Shooter, export and master folders are unaffected.
+

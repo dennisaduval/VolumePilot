@@ -9,6 +9,7 @@
       <Button Grid.Column="2" Content="Choose another job type" Click="OnReturnClick" />
     </Grid>
     <StackPanel Grid.Row="1" Spacing="8">
+    <TextBlock x:Name="OutputLayoutNotice" IsVisible="False" Text="This saved job retains its previous output layout. Start a new job for combined team folders and compact filenames." TextWrapping="Wrap" />
     <Expander x:Name="SetupPanel" Header="Job and folder setup" IsExpanded="True">
       <StackPanel Spacing="8" Margin="0,8">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><ComboBox x:Name="SavedJobs" PlaceholderText="Resume a saved job" SelectionChanged="OnSavedJobChanged" /><Button Grid.Column="1" Content="New job" Click="OnNewJobClick" /></Grid>

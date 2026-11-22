@@ -300,6 +300,10 @@ public sealed class CaptureDataStoreTests
             var again = await exporter.ExportAsync(eventId, root, JobImageExportKind.EditedPng, token);
             Assert.Equal(Directory.GetFiles(all, "*.png").Select(Path.GetFileName).Order(),
                 Directory.GetFiles(Path.Combine(again.Location, "All Images", "Test team"), "*.png").Select(Path.GetFileName).Order());
+            await store.ApplyReviewActionAsync(images[0].Image.Id, CaptureImageReviewAction.SetSecondary, token);
+            await store.ApplyReviewActionAsync(images[0].Image.Id, CaptureImageReviewAction.ToggleBanner, token);
+            var allRoles = await exporter.ExportAsync(eventId, root, JobImageExportKind.EditedPng, token);
+            Assert.True(File.Exists(Path.Combine(allRoles.Location, "All Images", "Test team", "Alex_Example_Test_team_07_10-01_Team_Secondary_Banner.png")));
             var csv = await File.ReadAllTextAsync(Path.Combine(all, "SPA.csv"), token);
             Assert.Contains("POSITION", csv);
             Assert.Contains("LEAGUENAME", csv);

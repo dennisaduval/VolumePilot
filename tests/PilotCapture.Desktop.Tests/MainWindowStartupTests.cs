@@ -86,7 +86,7 @@ public sealed class MainWindowStartupTests
                     using (var legacyScope = provider.CreateScope())
                     {
                         var legacyDb = legacyScope.ServiceProvider.GetRequiredService<PilotCaptureDbContext>();
-                        Complete(legacyDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE fast_capture_jobs SET output_version=1, individuals_folder={individuals} WHERE id={jobId}"));
+                        Complete(legacyDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE fast_capture_jobs SET output_version=1, individuals_folder={individuals} WHERE id={jobId}", TestContext.Current.CancellationToken));
                     }
                     Complete(portraitFast.ImportConfiguredRosterAsync(new(jobId, "schedule.csv",
                         System.Text.Encoding.UTF8.GetBytes("TEAMNAME,ORDER\r\nFalcons,2\r\nBears,1\r\n"), 0, null, 1)));
