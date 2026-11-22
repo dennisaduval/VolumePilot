@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="NetMQ" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <ProjectReference Include="..\PilotCapture.Domain\PilotCapture.Domain.csproj" />
     <ProjectReference Include="..\PilotCapture.Application\PilotCapture.Application.csproj" />
@@ -8,3 +9,4 @@
     <EmbeddedResource Include="Persistence\Migrations\*.sql" />
   </ItemGroup>
 </Project>
+

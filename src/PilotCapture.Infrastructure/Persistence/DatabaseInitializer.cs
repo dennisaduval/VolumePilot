@@ -27,7 +27,7 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
         await using var readVersion = connection.CreateCommand();
         readVersion.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations;";
         var currentVersion = Convert.ToInt32(await readVersion.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
-        if (currentVersion >= 4)
+        if (currentVersion >= 13)
         {
             await EnsureLocalInstallationAsync(cancellationToken);
             return;
@@ -94,9 +94,110 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
 
             await MarkMigrationAsync(connection, transaction, 4, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            currentVersion = 4;
         }
 
+        if (currentVersion < 5)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0005_team_individual.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 5, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 6)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0006_fast_capture.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 6, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 7)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0007_fast_roster_order.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 7, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 8)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0008_individual_primary_copy.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 8, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 9)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0009_fast_performance_details.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 9, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 10)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0010_fast_primary_marker.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 10, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 11)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0011_fast_schedule_groups.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 11, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 12)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0012_action_capture_timing.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 12, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        if (currentVersion < 13)
+        {
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var migrate = connection.CreateCommand();
+            migrate.Transaction = transaction;
+            migrate.CommandText = await ReadMigrationAsync("0013_field_output.sql", cancellationToken);
+            await migrate.ExecuteNonQueryAsync(cancellationToken);
+            await MarkMigrationAsync(connection, transaction, 13, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
         await EnsureLocalInstallationAsync(cancellationToken);
+        if (currentVersion < 13)
+        {
+            var inferredStation = "s" + PilotCapture.Application.FastCapture.CaptureFileNames.Station(Environment.MachineName);
+            if (StationCodes.IsSupported(inferredStation) && !await dbContext.CaptureSessions.AnyAsync(s => s.EndedAtUtc == null, cancellationToken))
+            {
+                var installation = await dbContext.LocalInstallations.SingleAsync(cancellationToken);
+                installation.StationCode = inferredStation;
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
     }
 
     private static async Task MarkMigrationAsync(
@@ -124,7 +225,8 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
         if (await dbContext.LocalInstallations.AnyAsync(cancellationToken))
             return;
 
-        dbContext.LocalInstallations.Add(LocalInstallation.Create("s10", DateTimeOffset.UtcNow));
+        dbContext.LocalInstallations.Add(LocalInstallation.Create(StationCodes.IsSupported("s" + PilotCapture.Application.FastCapture.CaptureFileNames.Station(Environment.MachineName))
+            ? "s" + PilotCapture.Application.FastCapture.CaptureFileNames.Station(Environment.MachineName) : "s10", DateTimeOffset.UtcNow));
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -139,3 +241,6 @@ public sealed class DatabaseInitializer(PilotCaptureDbContext dbContext)
         return await reader.ReadToEndAsync(cancellationToken);
     }
 }
+
+
+

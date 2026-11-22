@@ -176,3 +176,6 @@ The initial Pilot Capture solution structure, domain model, SQLite schema, and m
 VolumePilot
 
 A modular operating platform for professional volume photography.
+
+
+Field-output requirements and upgrade behavior: [November 2026](docs/pilot-capture/field-output-november-2026.md).

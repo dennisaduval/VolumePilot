@@ -41,9 +41,12 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
         {
             Membership? membership = null;
             var groupName = row.GroupName?.Trim();
-            if (string.IsNullOrWhiteSpace(row.FirstName)
-                || string.IsNullOrWhiteSpace(row.LastName)
-                || string.IsNullOrWhiteSpace(groupName))
+            var hasName = command.AllowDisplayNameOnly
+                ? !string.IsNullOrWhiteSpace(row.DisplayName)
+                : !string.IsNullOrWhiteSpace(row.FirstName) && !string.IsNullOrWhiteSpace(row.LastName);
+            var placeholder = command.AllowDisplayNameOnly && !hasName &&
+                !string.IsNullOrWhiteSpace(row.ClassOrCategory);
+            if ((!hasName && !placeholder) || string.IsNullOrWhiteSpace(groupName))
             {
                 skipped++;
             }
@@ -61,19 +64,21 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
                     groups.Add(groupName, group);
                 }
 
-                var subjectKey = row.PotentialMatchKey is { } key && command.ConfirmedMatchKeys.Contains(key)
+                var subjectKey = !placeholder && row.PotentialMatchKey is { } key && command.ConfirmedMatchKeys.Contains(key)
                     ? "match:" + key
                     : "row:" + row.SourceRecordNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 if (!subjects.TryGetValue(subjectKey, out var subject))
                 {
-                    var firstName = row.FirstName.Trim();
-                    var lastName = row.LastName.Trim();
+                    var firstName = row.FirstName?.Trim();
+                    var lastName = row.LastName?.Trim();
                     subject = new Subject
                     {
                         EventId = captureEvent.Id,
                         FirstName = firstName,
                         LastName = lastName,
-                        DisplayName = $"{firstName} {lastName}",
+                        IdentityStatus = placeholder ? SubjectIdentityStatus.Unidentified : SubjectIdentityStatus.Known,
+                        DisplayName = placeholder ? $"{row.ClassOrCategory} (unnamed · row {row.SourceRecordNumber})"
+                            : command.AllowDisplayNameOnly ? row.DisplayName : $"{firstName} {lastName}",
                         CreatedAtUtc = now,
                         IsActive = true
                     };
@@ -92,6 +97,7 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
                         Role = row.ClassOrCategory,
                         SourceRowKey = row.SourceRecordNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         SourceDataJson = row.SourceDataJson,
+                        SpaDataJson = placeholder ? UnnamedSpaData(row) : row.SpaDataJson,
                         CreatedAtUtc = now,
                         IsActive = true
                     };
@@ -121,5 +127,15 @@ public sealed class RosterImportService(PilotCaptureDbContext dbContext) : IRost
         return new RosterImportResult(captureEvent.Id, import.Id, import.RowsRead, import.RowsImported, import.RowsSkipped);
     }
 
+    private static string UnnamedSpaData(RosterPreviewRow row)
+    {
+        var fields = row.SpaDataJson is { } json
+            ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json)!
+            : SpaRosterFields.ReadSource(row.SourceDataJson);
+        fields["NAME"] = "";
+        return System.Text.Json.JsonSerializer.Serialize(fields);
+    }
+
     public static string ComputeSha256(ReadOnlySpan<byte> content) => Convert.ToHexString(SHA256.HashData(content));
 }
+

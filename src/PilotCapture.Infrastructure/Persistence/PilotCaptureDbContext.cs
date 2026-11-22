@@ -21,6 +21,17 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
     public DbSet<RosterImportRow> RosterImportRows => Set<RosterImportRow>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
+    public DbSet<FastCaptureJob> FastJobs => Set<FastCaptureJob>();
+    public DbSet<FastCaptureTeam> FastTeams => Set<FastCaptureTeam>();
+    public DbSet<FastCaptureRosterImport> FastRosterImports => Set<FastCaptureRosterImport>();
+    public DbSet<FastCaptureImage> FastImages => Set<FastCaptureImage>();
+
+    public DbSet<ActionChangeover> ActionChangeovers => Set<ActionChangeover>();
+    public DbSet<ActionCamera> ActionCameras => Set<ActionCamera>();
+    public DbSet<ActionClockSample> ActionClockSamples => Set<ActionClockSample>();
+    public DbSet<ActionPhotoMetadata> ActionPhotoMetadatas => Set<ActionPhotoMetadata>();
+    public DbSet<ActionReceipt> ActionReceipts => Set<ActionReceipt>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Event>(entity =>
@@ -134,7 +145,10 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
             entity.Property(x => x.Id).HasMaxLength(26);
             entity.Property(x => x.ReviewState).HasConversion<int>();
             entity.HasIndex(x => new { x.CaptureSetId, x.SequenceNumber }).IsUnique();
-            entity.HasIndex(x => x.CaptureSetId).IsUnique().HasFilter("is_primary = 1");
+            entity.Property(x => x.SelectionScopeId).IsRequired();
+            entity.HasIndex(x => x.SelectionScopeId).IsUnique().HasFilter("is_primary = 1").HasDatabaseName("ix_capture_images_primary_scope");
+            entity.HasIndex(x => x.SelectionScopeId).IsUnique().HasFilter("is_secondary = 1").HasDatabaseName("ix_capture_images_secondary_scope");
+            entity.HasIndex(x => x.SelectionScopeId).IsUnique().HasFilter("is_banner = 1").HasDatabaseName("ix_capture_images_banner_scope");
             entity.HasOne(x => x.CaptureSet).WithMany(x => x.Images).HasForeignKey(x => x.CaptureSetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.ImageAsset).WithOne().HasForeignKey<CaptureImage>(x => x.ImageAssetId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -195,6 +209,40 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
             entity.HasOne<LocalInstallation>().WithMany().HasForeignKey(x => x.InstallationId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<FastCaptureJob>(e => { e.ToTable("fast_capture_jobs"); e.HasKey(x => x.Id); });
+        modelBuilder.Entity<ActionChangeover>(e =>
+        {
+            e.ToTable("action_changeovers"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.UtcTicks });
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<FastCaptureTeam>().WithMany().HasForeignKey(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ActionCamera>(e => { e.ToTable("action_cameras"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.CameraKey }).IsUnique(); });
+        modelBuilder.Entity<ActionClockSample>(e => { e.ToTable("action_clock_samples"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.VerificationPhotoKey }).IsUnique(); });
+        modelBuilder.Entity<ActionPhotoMetadata>(e => { e.ToTable("action_photo_metadata"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.PhotoKey }).IsUnique(); e.HasIndex(x => new { x.JobId, x.PathKey }); });
+        modelBuilder.Entity<ActionReceipt>(e => { e.ToTable("action_receipts"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.JobId, x.PathKey, x.SourceTicks, x.SourceLength }).IsUnique(); e.HasIndex(x => new { x.JobId, x.State }); });
+        modelBuilder.Entity<FastCaptureTeam>(e =>
+        {
+            e.ToTable("fast_capture_teams"); e.HasKey(x => x.Id);
+            e.Property(x => x.Name).UseCollation("NOCASE"); e.Property(x => x.FolderName).UseCollation("NOCASE");
+            e.HasIndex(x => new { x.JobId, x.Day, x.Hall, x.SortOrder });
+            e.HasIndex(x => new { x.JobId, x.Name, x.PerformanceKey }).IsUnique();
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<FastCaptureRosterImport>(e =>
+        {
+            e.ToTable("fast_capture_roster_imports"); e.HasKey(x => x.Id);
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<FastCaptureImage>(e =>
+        {
+            e.ToTable("fast_capture_images"); e.HasKey(x => x.Id);
+            e.Property(x => x.SourcePath).UseCollation("NOCASE");
+            e.HasIndex(x => new { x.JobId, x.SourcePath, x.SourceTicks, x.SourceLength }).IsUnique();
+            e.HasIndex(x => new { x.TeamId, x.PlayerNumber }).IsUnique().HasFilter("is_primary = 1");
+            e.HasOne<FastCaptureJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<FastCaptureTeam>().WithMany().HasForeignKey(x => x.TeamId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(x => x.GetProperties()))
             property.SetColumnName(ToSnakeCase(property.Name));
     }
@@ -212,3 +260,5 @@ public sealed class PilotCaptureDbContext(DbContextOptions<PilotCaptureDbContext
         return result.ToString();
     }
 }
+
+

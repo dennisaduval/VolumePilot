@@ -42,30 +42,122 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
     public async Task<IReadOnlyList<CaptureEventChoice>> GetEventsAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Events.AsNoTracking()
             .Where(captureEvent => !captureEvent.IsArchived)
-            .OrderByDescending(captureEvent => captureEvent.Id)
+            .OrderBy(captureEvent => captureEvent.Name)
             .Select(captureEvent => new CaptureEventChoice(captureEvent.Id, captureEvent.Name))
             .ToListAsync(cancellationToken);
 
-    public async Task<IReadOnlyList<CaptureGroupChoice>> GetGroupsAsync(string eventId, CancellationToken cancellationToken = default) =>
-        await dbContext.Groups.AsNoTracking()
-            .Where(group => group.EventId == eventId && group.IsActive)
-            .OrderBy(group => group.Name)
-            .Select(group => new CaptureGroupChoice(group.Id, group.EventId, group.Name))
+    public async Task<IReadOnlyList<CaptureGroupChoice>> GetGroupsAsync(string eventId, CancellationToken cancellationToken = default)
+    {
+        var groups = await dbContext.Groups.AsNoTracking().Where(x => x.EventId == eventId && x.IsActive)
+            .OrderBy(x => x.Name).ToListAsync(cancellationToken);
+        var members = await dbContext.Memberships.AsNoTracking().Where(x => x.Group!.EventId == eventId && x.IsActive)
             .ToListAsync(cancellationToken);
+        return groups.Select(g =>
+        {
+            var league = members.Where(m => m.GroupId == g.Id).Select(m => m.SpaDataJson is { } json
+                ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,string>>(json)!.GetValueOrDefault("LEAGUENAME")
+                : PilotCapture.Application.Rosters.SpaRosterFields.ReadSource(m.SourceDataJson).GetValueOrDefault("LEAGUENAME"))
+                .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+            var name = league is not null && g.Name.StartsWith(league + " / ", StringComparison.Ordinal)
+                ? g.Name[(league.Length + 3)..] : g.Name;
+            return new CaptureGroupChoice(g.Id, g.EventId, name, league);
+        }).ToArray();
+    }
+
+    public async Task<string> AddTeamAsync(string sessionId, string name, string? context, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var label = string.IsNullOrWhiteSpace(context) ? name.Trim() : $"{name.Trim()} / {context.Trim()}";
+        if (label.Length > 200) throw new ArgumentException("The team and its context can be at most 200 characters.");
+        var session = await dbContext.CaptureSessions.SingleOrDefaultAsync(x => x.Id == sessionId && x.EndedAtUtc == null, cancellationToken)
+            ?? throw new InvalidOperationException("Start a session before adding a team.");
+        var teams = await dbContext.Groups.Where(x => x.EventId == session.EventId && x.IsActive).ToListAsync(cancellationToken);
+        if (teams.Any(x => x.Name.Equals(label, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("That team is already listed. Enter a different school or division for another team with the same name.");
+        var team = new Group { EventId = session.EventId, Name = label, CreatedAtUtc = DateTimeOffset.UtcNow, IsActive = true };
+        dbContext.Groups.Add(team);
+        await CompleteCurrentCaptureSetAsync(session.Id, DateTimeOffset.UtcNow, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return team.Id;
+    }
+
+    private IQueryable<Membership> EditablePlayers(string sessionId) =>
+        dbContext.Memberships.Where(x => x.IsActive && x.Group!.IsActive && x.Subject!.IsActive &&
+            dbContext.CaptureSessions.Any(s => s.Id == sessionId && s.EndedAtUtc == null &&
+                s.EventId == x.Group!.EventId && s.EventId == x.Subject!.EventId));
+
+    public async Task<CapturePlayerInformation> GetPlayerInformationAsync(string sessionId, string membershipId, CancellationToken cancellationToken = default) =>
+        await EditablePlayers(sessionId).AsNoTracking().Where(x => x.Id == membershipId)
+            .Select(x => new CapturePlayerInformation(x.Subject!.DisplayName,
+                new CaptureSubjectDetails(x.Subject!.FirstName, x.Subject!.LastName, x.RosterNumber, x.Role)))
+            .SingleOrDefaultAsync(cancellationToken) ?? throw new InvalidOperationException("The player is unavailable in this session.");
+
+    public async Task UpdatePlayerInformationAsync(string sessionId, string membershipId, CapturePlayerInformation information, CancellationToken cancellationToken = default)
+    {
+        var name = NormalizeOptional(information.DisplayName, 250, nameof(information.DisplayName))
+            ?? throw new ArgumentException("Enter a display name.");
+        var first = NormalizeOptional(information.Details.FirstName, 100, nameof(information.Details.FirstName));
+        var last = NormalizeOptional(information.Details.LastName, 100, nameof(information.Details.LastName));
+        var number = NormalizeOptional(information.Details.RosterNumber, 50, nameof(information.Details.RosterNumber));
+        var role = NormalizeOptional(information.Details.Role, 100, nameof(information.Details.Role));
+        var membership = await EditablePlayers(sessionId).Include(x => x.Subject).SingleOrDefaultAsync(x => x.Id == membershipId, cancellationToken)
+            ?? throw new InvalidOperationException("The player is unavailable in this session.");
+        var subject = membership.Subject!;
+        var memberships = await dbContext.Memberships.Where(x => x.SubjectId == subject.Id).ToListAsync(cancellationToken);
+        if (subject.IdentityStatus == SubjectIdentityStatus.Unidentified &&
+            (!string.Equals(subject.DisplayName, name, StringComparison.Ordinal) || first is not null || last is not null))
+            subject.IdentityStatus = SubjectIdentityStatus.Known;
+        subject.DisplayName = name;
+        subject.FirstName = first;
+        subject.LastName = last;
+        membership.RosterNumber = number;
+        membership.Role = role;
+        foreach (var item in memberships)
+        {
+            var fields = item.SpaDataJson is { } json
+                ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json)!
+                : PilotCapture.Application.Rosters.SpaRosterFields.ReadSource(item.SourceDataJson);
+            fields["NAME"] = subject.IdentityStatus == SubjectIdentityStatus.Unidentified ? "" : name;
+            fields["FIRSTNAME"] = first ?? "";
+            fields["LASTNAME"] = last ?? "";
+            if (item.Id == membership.Id) fields["NUMBER"] = number ?? "";
+            item.SpaDataJson = System.Text.Json.JsonSerializer.Serialize(fields);
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task CompleteSubjectAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        await CompleteCurrentCaptureSetAsync(sessionId, DateTimeOffset.UtcNow, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
 
     public async Task<IReadOnlyList<CaptureSubjectChoice>> GetSubjectsAsync(string groupId, CancellationToken cancellationToken = default) =>
         await dbContext.Memberships.AsNoTracking()
             .Where(membership => membership.GroupId == groupId && membership.IsActive && membership.Subject!.IsActive)
-            .OrderBy(membership => membership.Subject!.LastName)
-            .ThenBy(membership => membership.Subject!.FirstName)
+            .OrderBy(membership => EF.Functions.Collate(membership.Subject!.DisplayName, "NOCASE"))
             .ThenBy(membership => membership.Id)
             .Select(membership => new CaptureSubjectChoice(
                 membership.SubjectId,
                 membership.Id,
                 membership.Subject!.DisplayName,
                 membership.RosterNumber,
-                membership.Role))
+                membership.Role,
+                dbContext.CaptureImages.Any(image => image.SelectionScopeId == membership.Id),
+                membership.GroupId, membership.Group!.Name, membership.Subject!.IdentityStatus == SubjectIdentityStatus.Unidentified))
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<CaptureSubjectChoice>> SearchSubjectsAsync(string eventId, string query, CancellationToken cancellationToken = default)
+    {
+        var members = await dbContext.Memberships.AsNoTracking()
+            .Where(x => x.Subject!.EventId == eventId && x.IsActive && x.Subject.IsActive && x.Group!.IsActive)
+            .Select(x => new CaptureSubjectChoice(x.SubjectId, x.Id, x.Subject!.DisplayName, x.RosterNumber, x.Role,
+                dbContext.CaptureImages.Any(i => i.SelectionScopeId == x.Id), x.GroupId, x.Group!.Name, x.Subject!.IdentityStatus == SubjectIdentityStatus.Unidentified))
+            .ToListAsync(cancellationToken);
+        var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return members.Where(x => words.All(w => $"{x.DisplayName} {x.RosterNumber} {x.GroupName}".Contains(w, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase).ThenBy(x => x.GroupName).ToArray();
+    }
 
     public async Task<ActiveCaptureSession?> GetActiveSessionAsync(CancellationToken cancellationToken = default)
     {
@@ -201,7 +293,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         };
         dbContext.CaptureSets.Add(captureSet);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new CaptureSetResult(captureSet.Id, subjectName, false, membership.GroupId, membership.Id, startedAt);
+        return new CaptureSetResult(captureSet.Id, subjectName, membership.Subject.IdentityStatus == SubjectIdentityStatus.Unidentified, membership.GroupId, membership.Id, startedAt);
     }
 
     public async Task<CaptureSetResult> CreateManualSubjectAsync(
@@ -262,6 +354,9 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
                 RosterNumber = rosterNumber,
                 Role = role,
                 SourceDataJson = "{\"source\":\"photographer-entry\"}",
+                SpaDataJson = System.Text.Json.JsonSerializer.Serialize(role is null
+                    ? new Dictionary<string,string> { ["TEAMNAME"] = group.Name }
+                    : new Dictionary<string,string> { ["TEAMNAME"] = group.Name, ["CLASS"] = role }),
                 CreatedAtUtc = now
             };
             dbContext.Memberships.Add(membership);
@@ -372,17 +467,10 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             {
                 groupId = currentMembership.GroupId;
                 var groupSubjects = await GetSubjectsAsync(currentMembership.GroupId, cancellationToken);
-                var currentIndex = -1;
-                for (var index = 0; index < groupSubjects.Count; index++)
-                {
-                    if (groupSubjects[index].MembershipId == currentMembership.Id)
-                    {
-                        currentIndex = index;
-                        break;
-                    }
-                }
-                if (currentIndex >= 0 && currentIndex + 1 < groupSubjects.Count)
-                    nextSubject = groupSubjects[currentIndex + 1];
+                // Start after the current athlete, wrap once, skip photographed memberships.
+                var currentIndex = groupSubjects.ToList().FindIndex(x => x.MembershipId == currentMembership.Id);
+                nextSubject = groupSubjects.Skip(currentIndex + 1).Concat(groupSubjects.Take(Math.Max(0, currentIndex)))
+                    .FirstOrDefault(x => !x.HasPhotos && x.MembershipId != currentMembership.Id);
             }
         }
 
@@ -406,7 +494,7 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
         return new CaptureSetResult(
             nextCaptureSet.Id,
             nextSubject.DisplayName,
-            false,
+            nextSubject.IsUnidentified,
             groupId,
             nextSubject.MembershipId,
             now);
@@ -436,3 +524,4 @@ public sealed class CaptureWorkflowService(PilotCaptureDbContext dbContext) : IC
             set.CompletedAtUtc = completedAtUtc;
     }
 }
+

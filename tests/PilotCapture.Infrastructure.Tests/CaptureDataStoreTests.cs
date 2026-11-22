@@ -149,20 +149,21 @@ public sealed class CaptureDataStoreTests
         var second = CreateImage(captureSet.Id, 1);
         await store.AddImageAsync(second.Image, second.Asset, CreateAuditEntry(second.Image, installationId), cancellationToken);
         Assert.False(second.Image.IsPrimary);
-        Assert.Equal(CaptureImageReviewState.Pending, second.Image.ReviewState);
+        Assert.True(second.Image.IsSecondary);
+        Assert.Equal(CaptureImageReviewState.Accepted, second.Image.ReviewState);
 
         await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.ToggleBanner, cancellationToken);
         await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.ToggleBanner, cancellationToken);
         Assert.True(first.Image.IsPrimary);
         Assert.True(first.Image.IsBanner);
-        Assert.True(second.Image.IsBanner);
+        Assert.False(second.Image.IsBanner);
 
         await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, cancellationToken);
         Assert.Equal(CaptureImageReviewState.Rejected, first.Image.ReviewState);
         Assert.False(first.Image.IsPrimary);
         Assert.False(first.Image.IsBanner);
         Assert.True(second.Image.IsPrimary);
-        Assert.True(second.Image.IsBanner);
+        Assert.False(second.Image.IsBanner);
         Assert.Equal(CaptureImageReviewState.Accepted, second.Image.ReviewState);
 
         var auditEntries = await dbContext.AuditEntries.ToListAsync(cancellationToken);
@@ -185,6 +186,134 @@ public sealed class CaptureDataStoreTests
         Assert.Contains("Alex Example", csv);
         Assert.Contains("File Exists", csv);
         Assert.Contains(",False", csv);
+    }
+
+    [Fact]
+    public async Task Roles_persist_across_visits_toggle_rejection_and_remain_unique()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(token);
+        var options = new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(connection).Options;
+        await using var db = new PilotCaptureDbContext(options);
+        await new DatabaseInitializer(db).InitializeAsync(token);
+        var set = await CreateCaptureSetAsync(db, token);
+        var installation = await db.LocalInstallations.Select(x => x.InstallationId).SingleAsync(token);
+        var store = new CaptureDataStore(db);
+        var first = CreateImage(set.Id, 0);
+        await store.AddImageAsync(first.Image, first.Asset, CreateAuditEntry(first.Image, installation), token);
+        Assert.True(first.Image.IsPrimary);
+        Assert.False(first.Image.IsSecondary || first.Image.IsBanner);
+        var second = CreateImage(set.Id, 1);
+        await store.AddImageAsync(second.Image, second.Asset, CreateAuditEntry(second.Image, installation), token);
+        Assert.True(first.Image.IsPrimary && second.Image.IsSecondary);
+        Assert.False(first.Image.IsSecondary || first.Image.IsBanner || second.Image.IsBanner);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.SetPrimary, token);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.ToggleBanner, token);
+        Assert.True(second.Image.IsPrimary && second.Image.IsSecondary && second.Image.IsBanner);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.SetSecondary, token);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.ToggleBanner, token);
+        Assert.True(second.Image.IsPrimary);
+        Assert.False(second.Image.IsSecondary || second.Image.IsBanner);
+        var repeatedSet = new CaptureSet { CaptureSessionId = set.CaptureSessionId, SubjectId = set.SubjectId, MembershipId = set.MembershipId, StartedAtUtc = DateTimeOffset.UtcNow };
+        db.CaptureSets.Add(repeatedSet); await db.SaveChangesAsync(token);
+        var third = CreateImage(repeatedSet.Id, 2);
+        await store.AddImageAsync(third.Image, third.Asset, CreateAuditEntry(third.Image, installation), token);
+        Assert.False(third.Image.IsSecondary || third.Image.IsBanner);
+        await store.ApplyReviewActionAsync(third.Image.Id, CaptureImageReviewAction.SetSecondary, token);
+        Assert.True(third.Image.IsSecondary && second.Image.IsPrimary);
+        await store.ApplyReviewActionAsync(second.Image.Id, CaptureImageReviewAction.Reject, token);
+        Assert.True(first.Image.IsPrimary && third.Image.IsSecondary);
+        await store.ApplyReviewActionAsync(first.Image.Id, CaptureImageReviewAction.Reject, token);
+        Assert.True(third.Image.IsPrimary && third.Image.IsSecondary);
+        Assert.False(third.Image.IsBanner);
+        var review = new ImageReviewService(db, store);
+        Assert.Equal(3, (await review.GetImagesAsync(repeatedSet.Id, token)).Count);
+        await store.ApplyReviewActionAsync(third.Image.Id, CaptureImageReviewAction.Reject, token);
+        Assert.All(await review.GetImagesAsync(repeatedSet.Id, token), x => Assert.False(x.IsPrimary || x.IsSecondary || x.IsBanner));
+        db.ChangeTracker.Clear();
+        await new DatabaseInitializer(db).InitializeAsync(token);
+        Assert.Equal(3, (await review.GetImagesAsync(repeatedSet.Id, token)).Count);
+    }
+
+    [Fact]
+    public async Task Team_exports_pair_pngs_use_collision_safe_names_and_exclude_rejected_images()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(token);
+        await using var db = new PilotCaptureDbContext(new DbContextOptionsBuilder<PilotCaptureDbContext>().UseSqlite(connection).Options);
+        await new DatabaseInitializer(db).InitializeAsync(token);
+        var set = await CreateCaptureSetAsync(db, token);
+        var membership = await db.Memberships.SingleAsync(token);
+        membership.RosterNumber = "07";
+        membership.SpaDataJson = "{\"POSITION\":\"Pitcher\",\"LEAGUENAME\":\"League A\",\"SPATEXT1\":\"Hello, team\"}";
+        await db.SaveChangesAsync(token);
+        var installation = await db.LocalInstallations.Select(x => x.InstallationId).SingleAsync(token);
+        var root = Path.Combine(Path.GetTempPath(), "pilot-export-" + Guid.NewGuid().ToString("N"));
+        var media = Path.Combine(root, "media");
+        var master = Path.Combine(root, "master");
+        Directory.CreateDirectory(master);
+        try
+        {
+            var store = new CaptureDataStore(db);
+            var images = new List<(CaptureImage Image, ImageAsset Asset)>();
+            for (var n = 0; n < 3; n++)
+            {
+                var pair = CreateImage(set.Id, n);
+                var bytes = new byte[] { 255, 216, 255, (byte)n };
+                pair.Asset.Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+                var file = Path.Combine(media, pair.Asset.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                await File.WriteAllBytesAsync(file, bytes, token);
+                await store.AddImageAsync(pair.Image, pair.Asset, CreateAuditEntry(pair.Image, installation), token);
+                images.Add(pair);
+            }
+            await store.ApplyReviewActionAsync(images[2].Image.Id, CaptureImageReviewAction.Reject, token);
+            var exporter = new JobMediaService(db, new FileSystemImageAssetStore(media));
+            var eventId = await db.Events.Select(x => x.Id).SingleAsync(token);
+            await exporter.SetMasterPathAsync(master, token);
+            Assert.Equal(3, (await exporter.PublishOriginalsAsync(eventId, token)).Images);
+            Assert.Equal(3, (await exporter.PublishOriginalsAsync(eventId, token)).Images);
+            var masterOriginal = Path.Combine(master, "Original Images", eventId, images[0].Asset.Id + ".jpg");
+            await File.WriteAllBytesAsync(masterOriginal, [1, 2, 3], token);
+            await Assert.ThrowsAsync<IOException>(() => exporter.PublishOriginalsAsync(eventId, token));
+            Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(masterOriginal, token));
+            Assert.True(new FileSystemImageAssetStore(media).Exists(images[0].Asset.RelativePath));
+            await File.WriteAllBytesAsync(masterOriginal, [255, 216, 255, 0], token);
+            var batch = await exporter.ExportAsync(eventId, root, JobImageExportKind.BatchEditingOriginals, token);
+            Assert.Equal(2, Directory.GetFiles(Path.Combine(batch.Location, "original photos"), "*.jpg").Length);
+            Assert.True(File.Exists(Path.Combine(batch.Location, "original photos", images[0].Asset.Id + ".jpg")));
+            var before = Directory.GetDirectories(root).Length;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => exporter.ExportAsync(eventId, root, JobImageExportKind.EditedPng, token));
+            Assert.Equal(before, Directory.GetDirectories(root).Length);
+            foreach (var pair in images.Take(2))
+                await File.WriteAllBytesAsync(Path.Combine(master, "Extracted Images", eventId, pair.Asset.Id + ".png"), [137,80,78,71,13,10,26,10,1], token);
+            Assert.Equal(2, (await exporter.AssociateEditedAsync(eventId, token)).Images);
+            var result = await exporter.ExportAsync(eventId, root, JobImageExportKind.EditedPng, token);
+            var all = Path.Combine(result.Location, "All Images", "Test team");
+            var primary = Path.Combine(result.Location, "Team Photo Images", "Test team");
+            Assert.Equal(2, Directory.GetFiles(all, "*.png").Length);
+            Assert.Single(Directory.GetFiles(primary, "*.png"));
+            Assert.True(File.Exists(Path.Combine(all, "Alex_Example_Test_team_07_10-01_Team.png")));
+            Assert.True(File.Exists(Path.Combine(all, "Alex_Example_Test_team_07_10-02_Secondary.png")));
+            var again = await exporter.ExportAsync(eventId, root, JobImageExportKind.EditedPng, token);
+            Assert.Equal(Directory.GetFiles(all, "*.png").Select(Path.GetFileName).Order(),
+                Directory.GetFiles(Path.Combine(again.Location, "All Images", "Test team"), "*.png").Select(Path.GetFileName).Order());
+            await store.ApplyReviewActionAsync(images[0].Image.Id, CaptureImageReviewAction.SetSecondary, token);
+            await store.ApplyReviewActionAsync(images[0].Image.Id, CaptureImageReviewAction.ToggleBanner, token);
+            var allRoles = await exporter.ExportAsync(eventId, root, JobImageExportKind.EditedPng, token);
+            Assert.True(File.Exists(Path.Combine(allRoles.Location, "All Images", "Test team", "Alex_Example_Test_team_07_10-01_Team_Secondary_Banner.png")));
+            var csv = await File.ReadAllTextAsync(Path.Combine(all, "SPA.csv"), token);
+            Assert.Contains("POSITION", csv);
+            Assert.Contains("LEAGUENAME", csv);
+            Assert.Contains("SPATEXT1", csv);
+            Assert.Contains("\"Hello, team\"", csv);
+            foreach (var path in Directory.GetFiles(all, "*.png")) Assert.Contains(Path.GetFileName(path), csv);
+            Assert.Equal("_CON", JobMediaService.SafeName("CON"));
+            Assert.DoesNotContain('/', JobMediaService.SafeName("../bad/team"));
+        }
+        finally { Directory.Delete(root, true); }
     }
 
     private static async Task<CaptureSet> CreateCaptureSetAsync(
@@ -283,3 +412,5 @@ public sealed class CaptureDataStoreTests
         };
     }
 }
+
+

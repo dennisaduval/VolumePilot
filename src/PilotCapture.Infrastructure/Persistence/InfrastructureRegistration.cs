@@ -27,6 +27,11 @@ public static class InfrastructureRegistration
             options.UseSqlite(connectionString)
                 .AddInterceptors(new SqliteConnectionPolicy()));
         services.AddScoped<DatabaseInitializer>();
+        services.AddScoped<PilotCapture.Application.FastCapture.IFastCaptureService>(provider =>
+            new FastCaptureService(provider.GetRequiredService<PilotCaptureDbContext>(), mediaRootPath));
+        services.AddScoped<PilotCapture.Application.FastCapture.IActionCaptureService>(provider =>
+            new ActionCaptureService(provider.GetRequiredService<PilotCaptureDbContext>(), mediaRootPath));
+        services.AddTransient<FastCaptureController>();
         services.AddScoped<IRosterImportService, RosterImportService>();
         services.AddScoped<IRosterExportService, RosterExportService>();
         services.AddScoped<ICaptureWorkflowService, CaptureWorkflowService>();
@@ -34,7 +39,11 @@ public static class InfrastructureRegistration
         services.AddScoped<ICaptureDataStore, CaptureDataStore>();
         services.AddScoped<IImageIngestService, ImageIngestService>();
         services.AddScoped<IImageReviewService, ImageReviewService>();
+        services.AddScoped<IJobMediaService, JobMediaService>();
+        services.AddSingleton<IOriginalPublicationService, OriginalPublicationService>();
         services.AddScoped<IImageAssociationExportService, ImageAssociationExportService>();
         return services;
     }
 }
+
+

@@ -36,6 +36,13 @@ public static class RosterColumnSuggestionBuilder
         return new RosterColumnSuggestions(firstName, lastName, teamOrSchool, sportOrGroup, number, category, warnings);
     }
 
+    public static int? FindFullName(IReadOnlyList<string> headers) => Find(headers, "name", "fullname", "athletename", "playername");
+
+    public static int? FindTeam(IReadOnlyList<string> headers) => Find(headers, "team", "teamname", "groupname");
+
+    public static int? FindTeamContext(IReadOnlyList<string> headers) =>
+        Find(headers, "division", "level", "sport", "discipline") ?? Find(headers, "school", "schoolname");
+
     private static int? Find(IReadOnlyList<string> headers, params string[] aliases)
     {
         var accepted = aliases.ToHashSet(StringComparer.Ordinal);
@@ -58,7 +65,9 @@ public sealed record RosterColumnMapping(
     int? TeamOrSchoolColumn,
     int? SportOrGroupColumn,
     int? RosterNumberColumn,
-    int? ClassOrCategoryColumn);
+    int? ClassOrCategoryColumn,
+    int? FullNameColumn = null,
+    bool TeamVolume = false);
 
 public sealed record RosterPreviewRow(
     int SourceRecordNumber,
@@ -71,7 +80,8 @@ public sealed record RosterPreviewRow(
     string? PotentialMatchKey,
     int PotentialCrossGroupNameMatchCount,
     bool HasExpectedFieldCount,
-    string SourceDataJson);
+    string SourceDataJson,
+    string? SpaDataJson = null);
 
 public static class RosterImportPreviewBuilder
 {
@@ -89,25 +99,39 @@ public static class RosterImportPreviewBuilder
         ValidateColumn(mapping.RosterNumberColumn, document.Headers.Count, nameof(mapping.RosterNumberColumn));
         ValidateColumn(mapping.ClassOrCategoryColumn, document.Headers.Count, nameof(mapping.ClassOrCategoryColumn));
 
+        ValidateColumn(mapping.FullNameColumn, document.Headers.Count, nameof(mapping.FullNameColumn));
+
+        var roleColumn = mapping.TeamVolume ? FindRole(document.Headers) : null;
         var preliminary = document.Rows.Select(row =>
         {
             var firstName = GetValue(row, mapping.FirstNameColumn);
             var lastName = GetValue(row, mapping.LastNameColumn);
-            var normalizedName = NormalizeName(firstName, lastName);
+            var fullName = GetValue(row, mapping.FullNameColumn)?.Trim();
+            var displayName = string.IsNullOrWhiteSpace(fullName)
+                ? string.Join(" ", new[] { firstName, lastName }.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()))
+                : fullName;
+            var normalizedName = NormalizeName(displayName, null);
+            var sourceFields = SpaRosterFields.ReadSource(row.ToSourceDataJson());
             var groupParts = new[]
             {
+                sourceFields.GetValueOrDefault("LEAGUENAME"),
                 GetValue(row, mapping.TeamOrSchoolColumn),
+                mapping.TeamVolume ? sourceFields.GetValueOrDefault("SCHOOLNAME") : null,
                 GetValue(row, mapping.SportOrGroupColumn)
-            }.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim());
+            }.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase);
 
             return new PreviewCandidate(
                 row,
                 firstName,
                 lastName,
+                displayName,
                 normalizedName,
                 string.Join(" / ", groupParts),
                 GetValue(row, mapping.RosterNumberColumn),
-                GetValue(row, mapping.ClassOrCategoryColumn));
+                mapping.TeamVolume
+                    ? string.Join(" · ", new[] { GetValue(row, mapping.ClassOrCategoryColumn), GetValue(row, roleColumn) }
+                        .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
+                    : GetValue(row, mapping.ClassOrCategoryColumn));
         }).ToArray();
 
         var possibleMatches = preliminary
@@ -124,17 +148,37 @@ public static class RosterImportPreviewBuilder
             candidate.Row.RecordNumber,
             candidate.FirstName,
             candidate.LastName,
-            string.Join(" ", new[] { candidate.FirstName, candidate.LastName }
-                .Where(value => !string.IsNullOrWhiteSpace(value))
-                .Select(value => value!.Trim())),
+            candidate.DisplayName,
             string.IsNullOrWhiteSpace(candidate.GroupName) ? null : candidate.GroupName,
             candidate.RosterNumber,
             candidate.ClassOrCategory,
             possibleMatches.ContainsKey(candidate.NormalizedName) ? candidate.NormalizedName : null,
             possibleMatches.GetValueOrDefault(candidate.NormalizedName),
             candidate.Row.HasExpectedFieldCount,
-            candidate.Row.ToSourceDataJson())).ToArray();
+            candidate.Row.ToSourceDataJson(),
+            BuildSpaData(candidate, mapping))).ToArray();
     }
+
+    private static string BuildSpaData(PreviewCandidate candidate, RosterColumnMapping mapping)
+    {
+        var fields = SpaRosterFields.ReadSource(candidate.Row.ToSourceDataJson());
+        fields["FIRSTNAME"] = candidate.FirstName ?? "";
+        fields["LASTNAME"] = candidate.LastName ?? "";
+        if (mapping.FullNameColumn is not null) fields["NAME"] = candidate.DisplayName;
+        if (mapping.TeamVolume)
+        {
+            fields["TEAMNAME"] = GetValue(candidate.Row, mapping.TeamOrSchoolColumn) ?? candidate.GroupName;
+        }
+        if (mapping.RosterNumberColumn is not null) fields["NUMBER"] = candidate.RosterNumber ?? "";
+        // Retain separate TEAMNAME, SCHOOLNAME, CLASS and POSITION rather than conflating them.
+        if (!fields.ContainsKey("TEAMNAME") && !fields.ContainsKey("SCHOOLNAME") && !fields.ContainsKey("CLASS"))
+            fields["TEAMNAME"] = GetValue(candidate.Row, mapping.TeamOrSchoolColumn) ?? candidate.GroupName;
+        return System.Text.Json.JsonSerializer.Serialize(fields);
+    }
+
+    private static int? FindRole(IReadOnlyList<string> headers) =>
+        Enumerable.Range(0, headers.Count).Where(i => headers[i].Trim().Equals("Role", StringComparison.OrdinalIgnoreCase))
+            .Select(i => (int?)i).FirstOrDefault();
 
     private static string? GetValue(RosterCsvRow row, int? columnIndex) =>
         columnIndex is int index && index < row.Cells.Count ? row.Cells[index].Value : null;
@@ -157,6 +201,7 @@ public static class RosterImportPreviewBuilder
         RosterCsvRow Row,
         string? FirstName,
         string? LastName,
+        string DisplayName,
         string NormalizedName,
         string GroupName,
         string? RosterNumber,
@@ -168,7 +213,8 @@ public sealed record RosterImportCommand(
     string SourceFileName,
     string SourceSha256,
     IReadOnlyList<RosterPreviewRow> Rows,
-    IReadOnlySet<string> ConfirmedMatchKeys);
+    IReadOnlySet<string> ConfirmedMatchKeys,
+    bool AllowDisplayNameOnly = false);
 
 public sealed record RosterImportResult(
     string EventId,
@@ -181,3 +227,4 @@ public interface IRosterImportService
 {
     Task<RosterImportResult> ImportAsync(RosterImportCommand command, CancellationToken cancellationToken = default);
 }
+
