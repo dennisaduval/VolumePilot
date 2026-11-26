@@ -108,6 +108,9 @@ publication, including deliberate rebuilds until versioned destinations exist.
   uses small synthetic PNGs and is not a production speed estimate.
 - Added GitHub Actions for Python 3.13 on Linux, macOS, Windows; remote results
   are not yet observed. macOS runner testing is not Apple Silicon field validation.
+- Initial Linux CI passed. The macos-14 job was cancelled before tests ran;
+  its annotation is not available through the connector. Use macos-latest for
+  the current supported runner; do not infer a code failure from that cancellation.
 
 ### Known limitations / outstanding work
 
