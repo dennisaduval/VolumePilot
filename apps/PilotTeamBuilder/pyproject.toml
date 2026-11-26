@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pilot-teambuilder"
+version = "0.1.0.dev0"
+description = "Offline composite team photography for VolumePilot"
+requires-python = ">=3.13"
+dependencies = ["Pillow==11.3.0"]
+
+[project.scripts]
+pilot-teambuilder = "pilot_teambuilder.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pilot_teambuilder = ["data/*.csv"]
