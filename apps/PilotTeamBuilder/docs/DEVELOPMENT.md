@@ -106,11 +106,16 @@ publication, including deliberate rebuilds until versioned destinations exist.
 - Existing local Pilot Hotfolder suite: 13 tests pass; no source changes there.
 - Synthetic 42-athlete full render succeeds with stage timings. This benchmark
   uses small synthetic PNGs and is not a production speed estimate.
-- Added GitHub Actions for Python 3.13 on Linux, macOS, Windows; remote results
-  are not yet observed. macOS runner testing is not Apple Silicon field validation.
+- Python 3.13 CI tests passed on Linux, macos-latest and Windows for engine
+  revision `be287fa709e87ffab13a3fdacc4c8d0033dd7748` in draft PR #25.
+  macOS runner testing is not Apple Silicon photographic field validation.
 - Initial Linux CI passed. The macos-14 job was cancelled before tests ran;
   its annotation is not available through the connector. Use macos-latest for
   the current supported runner; do not infer a code failure from that cancellation.
+
+Repository handoff: `https://github.com/dennisaduval/VolumePilot/pull/25`, branch
+`feat/teambuilder-tb001-foundation`. Changes are additive and unmerged. Broader
+repository .NET/HQ checks were still running when this record was updated.
 
 ### Known limitations / outstanding work
 
